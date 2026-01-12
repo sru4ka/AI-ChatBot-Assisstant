@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Freshdesk AI Assistant",
+  "version": "1.0.0",
+  "description": "AI-powered reply suggestions for Freshdesk tickets using your knowledge base",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": ["https://*.freshdesk.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Freshdesk AI Assistant"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.freshdesk.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"]
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

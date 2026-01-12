@@ -1,0 +1,23 @@
+{
+  "name": "ai-chatbot-assistant",
+  "version": "1.0.0",
+  "description": "AI-powered Chrome extension for Freshdesk ticket replies using RAG",
+  "private": true,
+  "scripts": {
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:functions:serve": "supabase functions serve",
+    "supabase:functions:deploy": "supabase functions deploy",
+    "dashboard:dev": "cd admin-dashboard && npm run dev",
+    "dashboard:build": "cd admin-dashboard && npm run build",
+    "extension:dev": "cd extension && npm run dev",
+    "extension:build": "cd extension && npm run build"
+  },
+  "devDependencies": {
+    "supabase": "^1.187.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
