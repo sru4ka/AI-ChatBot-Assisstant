@@ -45,5 +45,8 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
 
-[functions]
+[functions.generate-reply]
+verify_jwt = false
+
+[functions.ingest-document]
 verify_jwt = false
