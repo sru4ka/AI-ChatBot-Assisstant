@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
-import { getConfig, saveConfig, generateReply, isConfigured, GenerateReplyResponse } from '../utils/api'
+import { signIn, signUp, signOut, getCurrentUser, generateReply, isLoggedIn, GenerateReplyResponse } from '../utils/api'
+import { User } from '@supabase/supabase-js'
 
-type Tab = 'main' | 'settings'
+type Tab = 'main' | 'account'
+type AuthMode = 'login' | 'signup'
 type Tone = 'professional' | 'friendly' | 'concise'
 
 interface TicketInfo {
@@ -11,7 +13,7 @@ interface TicketInfo {
 
 export default function Popup() {
   const [activeTab, setActiveTab] = useState<Tab>('main')
-  const [configured, setConfigured] = useState(false)
+  const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [isOnFreshdesk, setIsOnFreshdesk] = useState(false)
   const [isOnTicket, setIsOnTicket] = useState(false)
@@ -27,9 +29,12 @@ export default function Popup() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Settings state - only Business ID needed
-  const [businessId, setBusinessId] = useState('')
-  const [savingSettings, setSavingSettings] = useState(false)
+  // Auth state
+  const [authMode, setAuthMode] = useState<AuthMode>('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [businessName, setBusinessName] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
 
   useEffect(() => {
     init()
@@ -38,15 +43,8 @@ export default function Popup() {
   async function init() {
     setLoading(true)
     try {
-      // Check if configured
-      const isConf = await isConfigured()
-      setConfigured(isConf)
-
-      // Load existing config
-      const config = await getConfig()
-      if (config) {
-        setBusinessId(config.businessId)
-      }
+      const currentUser = await getCurrentUser()
+      setUser(currentUser)
 
       // Check if on Freshdesk
       chrome.runtime.sendMessage({ type: 'CHECK_FRESHDESK' }, (response) => {
@@ -58,25 +56,65 @@ export default function Popup() {
     }
   }
 
-  async function handleSaveSettings() {
-    if (!businessId) {
-      setError('Business ID is required')
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email || !password) {
+      setError('Please enter email and password')
       return
     }
 
-    setSavingSettings(true)
+    setAuthLoading(true)
     setError(null)
 
     try {
-      await saveConfig({ businessId })
-      setConfigured(true)
-      setSuccess('Settings saved successfully!')
+      const loggedInUser = await signIn(email, password)
+      setUser(loggedInUser)
+      setSuccess('Logged in successfully!')
       setActiveTab('main')
+      setEmail('')
+      setPassword('')
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings')
+      setError(err instanceof Error ? err.message : 'Login failed')
     } finally {
-      setSavingSettings(false)
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleSignUp(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email || !password || !businessName) {
+      setError('Please fill in all fields')
+      return
+    }
+
+    setAuthLoading(true)
+    setError(null)
+
+    try {
+      const newUser = await signUp(email, password, businessName)
+      setUser(newUser)
+      setSuccess('Account created! You can now upload documents in the Admin Dashboard.')
+      setActiveTab('main')
+      setEmail('')
+      setPassword('')
+      setBusinessName('')
+      setTimeout(() => setSuccess(null), 5000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign up failed')
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await signOut()
+      setUser(null)
+      setSuccess('Logged out successfully')
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Logout failed')
     }
   }
 
@@ -172,8 +210,8 @@ export default function Popup() {
         <button className={`tab ${activeTab === 'main' ? 'active' : ''}`} onClick={() => setActiveTab('main')}>
           Generate Reply
         </button>
-        <button className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
-          Settings
+        <button className={`tab ${activeTab === 'account' ? 'active' : ''}`} onClick={() => setActiveTab('account')}>
+          Account
         </button>
       </div>
 
@@ -183,9 +221,9 @@ export default function Popup() {
 
         {activeTab === 'main' ? (
           <>
-            {!configured ? (
+            {!user ? (
               <div className="status warning">
-                Please configure your Business ID in Settings to use this extension.
+                Please log in to use this extension.
               </div>
             ) : !isOnFreshdesk ? (
               <div className="status info">
@@ -283,32 +321,91 @@ export default function Popup() {
             )}
           </>
         ) : (
-          /* Settings Tab - Only Business ID */
+          /* Account Tab */
           <div className="settings-form">
-            <div className="form-group">
-              <label>Business ID</label>
-              <input
-                type="text"
-                value={businessId}
-                onChange={(e) => setBusinessId(e.target.value)}
-                placeholder="Enter your Business ID"
-              />
-              <small>Get this from your company's admin or the Admin Dashboard</small>
-            </div>
+            {user ? (
+              /* Logged in - show account info */
+              <>
+                <div className="account-info">
+                  <p><strong>Logged in as:</strong></p>
+                  <p>{user.email}</p>
+                </div>
 
-            <button
-              className="btn btn-primary"
-              onClick={handleSaveSettings}
-              disabled={savingSettings}
-            >
-              {savingSettings && <span className="spinner" />}
-              {savingSettings ? 'Saving...' : 'Save Settings'}
-            </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleLogout}
+                  style={{ marginTop: 16 }}
+                >
+                  Log Out
+                </button>
 
-            {configured && (
-              <div className="status success" style={{ marginTop: 16 }}>
-                Connected to Business ID: {businessId.slice(0, 8)}...
-              </div>
+                <div className="status info" style={{ marginTop: 16 }}>
+                  Upload documents via the Admin Dashboard to improve AI responses.
+                </div>
+              </>
+            ) : (
+              /* Not logged in - show login/signup form */
+              <>
+                <div className="auth-toggle" style={{ display: 'flex', marginBottom: 16 }}>
+                  <button
+                    className={`tab ${authMode === 'login' ? 'active' : ''}`}
+                    onClick={() => { setAuthMode('login'); setError(null) }}
+                    style={{ flex: 1 }}
+                  >
+                    Log In
+                  </button>
+                  <button
+                    className={`tab ${authMode === 'signup' ? 'active' : ''}`}
+                    onClick={() => { setAuthMode('signup'); setError(null) }}
+                    style={{ flex: 1 }}
+                  >
+                    Sign Up
+                  </button>
+                </div>
+
+                <form onSubmit={authMode === 'login' ? handleLogin : handleSignUp}>
+                  {authMode === 'signup' && (
+                    <div className="form-group">
+                      <label>Business/Store Name</label>
+                      <input
+                        type="text"
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        placeholder="Your company name"
+                      />
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@company.com"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Password</label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Your password"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={authLoading}
+                  >
+                    {authLoading && <span className="spinner" />}
+                    {authLoading ? (authMode === 'login' ? 'Logging in...' : 'Creating account...') : (authMode === 'login' ? 'Log In' : 'Create Account')}
+                  </button>
+                </form>
+              </>
             )}
           </div>
         )}

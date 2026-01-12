@@ -1,58 +1,43 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient, User } from '@supabase/supabase-js'
 
-// Hardcoded Supabase configuration - these are public keys, safe to include
+// Hardcoded Supabase configuration
 const SUPABASE_URL = 'https://iyeqiwixenjiakeisdae.supabase.co'
 const SUPABASE_ANON_KEY = 'sb_publishable_gx-_bqwBK-ghrRnXxf6b4g_cA6mfMkF'
 
-// Only Business ID needs to be configured by the user
-interface Config {
-  businessId: string
-}
-
-// For backwards compatibility with old config format
-interface LegacyConfig {
-  supabaseUrl?: string
-  supabaseAnonKey?: string
-  businessId: string
-}
-
 let supabase: SupabaseClient | null = null
 
-// Initialize Supabase client with hardcoded credentials
+// Initialize Supabase client
 function getSupabase(): SupabaseClient {
   if (!supabase) {
-    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        storage: {
+          getItem: (key) => {
+            return new Promise((resolve) => {
+              chrome.storage.local.get([key], (result) => {
+                resolve(result[key] || null)
+              })
+            })
+          },
+          setItem: (key, value) => {
+            return new Promise((resolve) => {
+              chrome.storage.local.set({ [key]: value }, () => {
+                resolve()
+              })
+            })
+          },
+          removeItem: (key) => {
+            return new Promise((resolve) => {
+              chrome.storage.local.remove([key], () => {
+                resolve()
+              })
+            })
+          },
+        },
+      },
+    })
   }
   return supabase
-}
-
-export async function getConfig(): Promise<LegacyConfig | null> {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(['businessId'], (result) => {
-      if (result.businessId) {
-        resolve({
-          supabaseUrl: SUPABASE_URL,
-          supabaseAnonKey: SUPABASE_ANON_KEY,
-          businessId: result.businessId,
-        })
-      } else {
-        resolve(null)
-      }
-    })
-  })
-}
-
-export async function saveConfig(config: Config | LegacyConfig): Promise<void> {
-  return new Promise((resolve) => {
-    // Only save businessId - ignore supabaseUrl and supabaseAnonKey if passed
-    chrome.storage.sync.set({ businessId: config.businessId }, () => {
-      resolve()
-    })
-  })
-}
-
-export async function getSupabaseClient(): Promise<SupabaseClient> {
-  return getSupabase()
 }
 
 export interface GenerateReplyResponse {
@@ -64,20 +49,79 @@ export interface GenerateReplyResponse {
   hasKnowledgeBase: boolean
 }
 
+// Auth functions
+export async function signIn(email: string, password: string): Promise<User> {
+  const client = getSupabase()
+  const { data, error } = await client.auth.signInWithPassword({
+    email,
+    password,
+  })
+
+  if (error) throw error
+  if (!data.user) throw new Error('Login failed')
+
+  return data.user
+}
+
+export async function signUp(email: string, password: string, businessName: string): Promise<User> {
+  const client = getSupabase()
+
+  // Sign up the user
+  const { data, error } = await client.auth.signUp({
+    email,
+    password,
+  })
+
+  if (error) throw error
+  if (!data.user) throw new Error('Sign up failed')
+
+  // Create their business record using their user ID as business ID
+  const { error: bizError } = await client.from('businesses').insert({
+    id: data.user.id,
+    name: businessName,
+  })
+
+  if (bizError) {
+    console.error('Error creating business:', bizError)
+    // Don't throw - user is created, business might already exist
+  }
+
+  return data.user
+}
+
+export async function signOut(): Promise<void> {
+  const client = getSupabase()
+  const { error } = await client.auth.signOut()
+  if (error) throw error
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+  const client = getSupabase()
+  const { data: { user } } = await client.auth.getUser()
+  return user
+}
+
+export async function isLoggedIn(): Promise<boolean> {
+  const user = await getCurrentUser()
+  return user !== null
+}
+
+// Generate reply using the logged-in user's business
 export async function generateReply(
   customerMessage: string,
   tone: 'professional' | 'friendly' | 'concise' = 'professional'
 ): Promise<GenerateReplyResponse> {
-  const config = await getConfig()
-  if (!config) {
-    throw new Error('Extension not configured. Please set your Business ID.')
+  const user = await getCurrentUser()
+  if (!user) {
+    throw new Error('Please log in to use this extension.')
   }
 
   const client = getSupabase()
 
+  // User's ID is their business ID
   const response = await client.functions.invoke('generate-reply', {
     body: {
-      businessId: config.businessId,
+      businessId: user.id,
       customerMessage,
       tone,
     },
@@ -90,7 +134,4 @@ export async function generateReply(
   return response.data
 }
 
-export async function isConfigured(): Promise<boolean> {
-  const config = await getConfig()
-  return config !== null
-}
+export { getSupabase }

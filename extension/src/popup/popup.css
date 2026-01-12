@@ -346,3 +346,27 @@ body {
   color: #667eea;
   border-bottom-color: #667eea;
 }
+
+/* Account info */
+.account-info {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #eee;
+  text-align: center;
+}
+
+.account-info p {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.account-info p:first-child {
+  color: #666;
+  font-size: 12px;
+}
+
+/* Auth toggle */
+.auth-toggle {
+  margin-bottom: 16px;
+}
