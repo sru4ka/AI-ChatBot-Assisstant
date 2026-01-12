@@ -1,21 +1,38 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-// Configuration will be loaded from storage
+// Hardcoded Supabase configuration - these are public keys, safe to include
+const SUPABASE_URL = 'https://iyeqiwixenjiakeisdae.supabase.co'
+const SUPABASE_ANON_KEY = 'sb_publishable_gx-_bqwBK-ghrRnXxf6b4g_cA6mfMkF'
+
+// Only Business ID needs to be configured by the user
 interface Config {
-  supabaseUrl: string
-  supabaseAnonKey: string
+  businessId: string
+}
+
+// For backwards compatibility with old config format
+interface LegacyConfig {
+  supabaseUrl?: string
+  supabaseAnonKey?: string
   businessId: string
 }
 
 let supabase: SupabaseClient | null = null
 
-export async function getConfig(): Promise<Config | null> {
+// Initialize Supabase client with hardcoded credentials
+function getSupabase(): SupabaseClient {
+  if (!supabase) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  }
+  return supabase
+}
+
+export async function getConfig(): Promise<LegacyConfig | null> {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['supabaseUrl', 'supabaseAnonKey', 'businessId'], (result) => {
-      if (result.supabaseUrl && result.supabaseAnonKey && result.businessId) {
+    chrome.storage.sync.get(['businessId'], (result) => {
+      if (result.businessId) {
         resolve({
-          supabaseUrl: result.supabaseUrl,
-          supabaseAnonKey: result.supabaseAnonKey,
+          supabaseUrl: SUPABASE_URL,
+          supabaseAnonKey: SUPABASE_ANON_KEY,
           businessId: result.businessId,
         })
       } else {
@@ -25,23 +42,17 @@ export async function getConfig(): Promise<Config | null> {
   })
 }
 
-export async function saveConfig(config: Config): Promise<void> {
+export async function saveConfig(config: Config | LegacyConfig): Promise<void> {
   return new Promise((resolve) => {
-    chrome.storage.sync.set(config, () => {
-      supabase = createClient(config.supabaseUrl, config.supabaseAnonKey)
+    // Only save businessId - ignore supabaseUrl and supabaseAnonKey if passed
+    chrome.storage.sync.set({ businessId: config.businessId }, () => {
       resolve()
     })
   })
 }
 
-export async function getSupabaseClient(): Promise<SupabaseClient | null> {
-  if (supabase) return supabase
-
-  const config = await getConfig()
-  if (!config) return null
-
-  supabase = createClient(config.supabaseUrl, config.supabaseAnonKey)
-  return supabase
+export async function getSupabaseClient(): Promise<SupabaseClient> {
+  return getSupabase()
 }
 
 export interface GenerateReplyResponse {
@@ -59,13 +70,10 @@ export async function generateReply(
 ): Promise<GenerateReplyResponse> {
   const config = await getConfig()
   if (!config) {
-    throw new Error('Extension not configured. Please set up your credentials.')
+    throw new Error('Extension not configured. Please set your Business ID.')
   }
 
-  const client = await getSupabaseClient()
-  if (!client) {
-    throw new Error('Could not connect to Supabase')
-  }
+  const client = getSupabase()
 
   const response = await client.functions.invoke('generate-reply', {
     body: {

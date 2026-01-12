@@ -27,9 +27,7 @@ export default function Popup() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
-  // Settings state
-  const [supabaseUrl, setSupabaseUrl] = useState('')
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState('')
+  // Settings state - only Business ID needed
   const [businessId, setBusinessId] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
@@ -47,8 +45,6 @@ export default function Popup() {
       // Load existing config
       const config = await getConfig()
       if (config) {
-        setSupabaseUrl(config.supabaseUrl)
-        setSupabaseAnonKey(config.supabaseAnonKey)
         setBusinessId(config.businessId)
       }
 
@@ -63,8 +59,8 @@ export default function Popup() {
   }
 
   async function handleSaveSettings() {
-    if (!supabaseUrl || !supabaseAnonKey || !businessId) {
-      setError('All fields are required')
+    if (!businessId) {
+      setError('Business ID is required')
       return
     }
 
@@ -72,7 +68,7 @@ export default function Popup() {
     setError(null)
 
     try {
-      await saveConfig({ supabaseUrl, supabaseAnonKey, businessId })
+      await saveConfig({ businessId })
       setConfigured(true)
       setSuccess('Settings saved successfully!')
       setActiveTab('main')
@@ -189,7 +185,7 @@ export default function Popup() {
           <>
             {!configured ? (
               <div className="status warning">
-                Please configure your settings first to use this extension.
+                Please configure your Business ID in Settings to use this extension.
               </div>
             ) : !isOnFreshdesk ? (
               <div className="status info">
@@ -287,39 +283,17 @@ export default function Popup() {
             )}
           </>
         ) : (
-          /* Settings Tab */
+          /* Settings Tab - Only Business ID */
           <div className="settings-form">
-            <div className="form-group">
-              <label>Supabase URL</label>
-              <input
-                type="text"
-                value={supabaseUrl}
-                onChange={(e) => setSupabaseUrl(e.target.value)}
-                placeholder="https://your-project.supabase.co"
-              />
-              <small>Your Supabase project URL</small>
-            </div>
-
-            <div className="form-group">
-              <label>Supabase Anon Key</label>
-              <input
-                type="password"
-                value={supabaseAnonKey}
-                onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                placeholder="Your anon/public key"
-              />
-              <small>Found in Supabase Dashboard → Settings → API</small>
-            </div>
-
             <div className="form-group">
               <label>Business ID</label>
               <input
                 type="text"
                 value={businessId}
                 onChange={(e) => setBusinessId(e.target.value)}
-                placeholder="Your business ID"
+                placeholder="Enter your Business ID"
               />
-              <small>Found in the Admin Dashboard settings</small>
+              <small>Get this from your company's admin or the Admin Dashboard</small>
             </div>
 
             <button
@@ -330,6 +304,12 @@ export default function Popup() {
               {savingSettings && <span className="spinner" />}
               {savingSettings ? 'Saving...' : 'Save Settings'}
             </button>
+
+            {configured && (
+              <div className="status success" style={{ marginTop: 16 }}>
+                Connected to Business ID: {businessId.slice(0, 8)}...
+              </div>
+            )}
           </div>
         )}
       </div>
