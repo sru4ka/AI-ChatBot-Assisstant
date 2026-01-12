@@ -22,7 +22,7 @@ interface InsertReplyResponse {
 }
 
 // Listen for messages from popup or content scripts
-chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   console.log('Background received message:', message.type)
 
   switch (message.type) {

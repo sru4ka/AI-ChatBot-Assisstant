@@ -8,7 +8,6 @@ import {
   getLatestCustomerMessage,
   getTicketSubject,
   insertReply,
-  createFloatingButton,
   removeFloatingButton,
 } from './utils/freshdesk'
 

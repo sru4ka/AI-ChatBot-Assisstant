@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { getConfig, saveConfig, generateReply, isConfigured, GenerateReplyResponse } from '../utils/api'
 
 type Tab = 'main' | 'settings'
