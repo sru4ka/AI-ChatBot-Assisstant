@@ -1,8 +1,7 @@
-# Supabase Configuration
+# Supabase Local Configuration
 # See: https://supabase.com/docs/guides/cli/config
 
-[project]
-id = "ai-chatbot-assistant"
+project_id = "iyeqiwixenjiakeisdae"
 
 [api]
 enabled = true
