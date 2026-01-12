@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { signIn, signUp, signOut, getCurrentUser, generateReply, isLoggedIn, GenerateReplyResponse } from '../utils/api'
+import { signIn, signUp, signOut, getCurrentUser, generateReply, GenerateReplyResponse } from '../utils/api'
 import { User } from '@supabase/supabase-js'
 
 type Tab = 'main' | 'account'
