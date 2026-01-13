@@ -30,79 +30,107 @@ interface FreshdeskConversation {
 }
 
 /**
- * Fetch RESOLVED tickets from Freshdesk API using filter
+ * Fetch RESOLVED and CLOSED tickets from Freshdesk API
  * Status 4 = Resolved, Status 5 = Closed
  */
 async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
-  const perPage = Math.min(count, 100)
+  const perPage = 100
   const tickets: FreshdeskTicket[] = []
 
-  // Fetch resolved tickets (status 4) and closed tickets (status 5)
-  for (const status of [4, 5]) {
-    let page = 1
-    while (tickets.length < count) {
-      const response = await fetch(
-        `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
-        {
-          headers: {
-            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-            'Content-Type': 'application/json',
-          },
-        }
-      )
+  console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
-      if (!response.ok) {
-        // If search API fails, fall back to regular API with filter
-        console.log(`Search API failed for status ${status}, trying filter API...`)
+  // Method 1: Use search API to find resolved and closed tickets
+  for (const status of [5, 4]) { // Prioritize closed (5) since resolved (4) become closed
+    if (tickets.length >= count) break
+
+    let page = 1
+    const maxPages = Math.ceil(count / 30) // Search API returns 30 per page
+
+    while (page <= maxPages && tickets.length < count) {
+      try {
+        const response = await fetch(
+          `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+          {
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+
+        if (!response.ok) {
+          console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
+          break
+        }
+
+        const data = await response.json()
+        if (!data.results || data.results.length === 0) {
+          console.log(`No more results for status ${status} at page ${page}`)
+          break
+        }
+
+        console.log(`Found ${data.results.length} tickets with status ${status} on page ${page}`)
+        tickets.push(...data.results)
+        page++
+
+        // Freshdesk rate limit: 50 requests per minute for search
+        await new Promise(resolve => setTimeout(resolve, 150))
+
+      } catch (err) {
+        console.error(`Error searching status ${status}:`, err)
         break
       }
-
-      const data = await response.json()
-      if (!data.results || data.results.length === 0) break
-
-      tickets.push(...data.results)
-      page++
-
-      // Freshdesk search API rate limit
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      if (data.results.length < 30) break // Less than page size means no more results
     }
   }
 
-  // If search didn't work well, fall back to fetching all and filtering
-  if (tickets.length < 10) {
-    console.log('Falling back to standard tickets API...')
-    const pages = Math.ceil(count / perPage)
+  console.log(`Search API found ${tickets.length} tickets total`)
 
-    for (let page = 1; page <= pages * 2; page++) {
-      const response = await fetch(
-        `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc`,
-        {
-          headers: {
-            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-            'Content-Type': 'application/json',
-          },
+  // Method 2: If search didn't find enough, use standard tickets API with filter
+  if (tickets.length < count) {
+    console.log('Supplementing with standard tickets API...')
+    const existingIds = new Set(tickets.map(t => t.id))
+
+    for (let page = 1; page <= 20 && tickets.length < count; page++) {
+      try {
+        const response = await fetch(
+          `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
+          {
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+
+        if (!response.ok) {
+          console.log(`Tickets API returned ${response.status} at page ${page}`)
+          break
         }
-      )
 
-      if (!response.ok) {
-        throw new Error(`Freshdesk API error: ${response.status} ${response.statusText}`)
+        const data = await response.json()
+        if (!data || data.length === 0) break
+
+        // Filter for resolved (4) or closed (5) tickets we don't already have
+        const newTickets = data.filter((t: FreshdeskTicket) =>
+          t.status >= 4 && !existingIds.has(t.id)
+        )
+
+        newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+        tickets.push(...newTickets)
+
+        console.log(`Page ${page}: found ${newTickets.length} new resolved/closed tickets`)
+
+        // Rate limit
+        await new Promise(resolve => setTimeout(resolve, 100))
+
+      } catch (err) {
+        console.error(`Error fetching page ${page}:`, err)
+        break
       }
-
-      const data = await response.json()
-      if (!data || data.length === 0) break
-
-      // Filter for resolved/closed tickets
-      const resolvedTickets = data.filter((t: FreshdeskTicket) => t.status >= 4)
-      tickets.push(...resolvedTickets)
-
-      if (tickets.length >= count) break
-
-      await new Promise(resolve => setTimeout(resolve, 100))
     }
   }
 
+  console.log(`Total tickets found: ${tickets.length}`)
   return tickets.slice(0, count)
 }
 
