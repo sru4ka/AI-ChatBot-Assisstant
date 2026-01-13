@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Freshdesk AI Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <h1>Freshdesk AI Assistant</h1>
+      <p class="subtitle">AI-powered reply suggestions</p>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="generate">Generate Reply</button>
+      <button class="tab" data-tab="knowledge">Knowledge Base</button>
+      <button class="tab" data-tab="learn">Learn</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+
+    <!-- Generate Reply Tab -->
+    <div id="generate-tab" class="tab-content active">
+      <!-- Status Message -->
+      <div id="status-message" class="status-message hidden"></div>
+
+      <!-- Connection Status -->
+      <div id="connection-status" class="connection-status">
+        <span class="status-dot"></span>
+        <span class="status-text">Checking connection...</span>
+      </div>
+
+      <!-- Scan Ticket Button -->
+      <button id="scan-ticket" class="btn btn-primary btn-full">
+        <span class="btn-icon">🔍</span>
+        Scan Ticket
+      </button>
+
+      <!-- Ticket Info (shown after scan) -->
+      <div id="ticket-info" class="ticket-info hidden">
+        <h3>Ticket Details</h3>
+        <div class="info-row">
+          <span class="label">Subject:</span>
+          <span id="ticket-subject" class="value">-</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Customer:</span>
+          <span id="ticket-customer" class="value">-</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Email:</span>
+          <span id="ticket-email" class="value">-</span>
+        </div>
+      </div>
+
+      <!-- Customer Message -->
+      <div id="customer-message-section" class="hidden">
+        <label for="customer-message">Customer Message:</label>
+        <textarea id="customer-message" rows="4" placeholder="Customer message will appear here..."></textarea>
+      </div>
+
+      <!-- Options -->
+      <div class="options">
+        <label class="checkbox-label">
+          <input type="checkbox" id="include-orders" checked>
+          <span>Include Shopify order info</span>
+        </label>
+        <div class="tone-select">
+          <label for="tone">Response tone:</label>
+          <select id="tone">
+            <option value="professional">Professional</option>
+            <option value="friendly">Friendly</option>
+            <option value="formal">Formal</option>
+            <option value="empathetic">Empathetic</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Generate Button -->
+      <button id="generate-reply" class="btn btn-success btn-full" disabled>
+        <span class="btn-icon">✨</span>
+        Generate Reply
+      </button>
+
+      <!-- Generated Reply -->
+      <div id="reply-section" class="reply-section hidden">
+        <div class="reply-header">
+          <h3>Generated Reply</h3>
+          <div class="reply-actions">
+            <button id="copy-reply" class="btn btn-small" title="Copy to clipboard">📋 Copy</button>
+            <button id="insert-reply" class="btn btn-small btn-primary" title="Insert into Freshdesk">📝 Insert</button>
+          </div>
+        </div>
+        <div id="generated-reply" class="generated-reply"></div>
+        <div id="order-info" class="order-info hidden">
+          <h4>Order Information Used:</h4>
+          <pre id="order-details"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Knowledge Base Tab -->
+    <div id="knowledge-tab" class="tab-content">
+      <!-- KB Status Message -->
+      <div id="kb-status-message" class="status-message hidden"></div>
+
+      <!-- Upload Documents Section -->
+      <div class="kb-section">
+        <h3>Upload Documents</h3>
+        <p class="description">Upload documents to train the AI with your company knowledge.</p>
+
+        <!-- File Upload Area -->
+        <div class="upload-area" id="upload-area">
+          <div class="upload-icon">📄</div>
+          <p>Drag and drop files here, or click to select</p>
+          <p class="supported-formats">Supported: .pdf, .docx, .txt, .md, .json</p>
+          <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.txt,.md,.json" hidden>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="upload-progress" class="upload-progress hidden">
+          <div class="progress-bar">
+            <div class="progress-fill" id="upload-progress-fill" style="width: 0%"></div>
+          </div>
+          <p class="progress-text" id="upload-progress-text">Uploading...</p>
+        </div>
+      </div>
+
+      <!-- Or Paste Text -->
+      <div class="kb-section">
+        <h3>Or paste text directly</h3>
+        <div class="setting-item">
+          <label for="doc-name">Document Name:</label>
+          <input type="text" id="doc-name" placeholder="e.g., Return Policy">
+        </div>
+        <div class="setting-item">
+          <label for="doc-content">Content:</label>
+          <textarea id="doc-content" rows="4" placeholder="Paste your document content here..."></textarea>
+        </div>
+        <button id="add-text-doc" class="btn btn-primary btn-full">
+          <span class="btn-icon">➕</span>
+          Add to Knowledge Base
+        </button>
+      </div>
+
+      <!-- Documents List -->
+      <div class="kb-section">
+        <div class="section-header">
+          <h3>Your Documents</h3>
+          <button id="refresh-docs" class="btn btn-small" title="Refresh list">🔄</button>
+        </div>
+
+        <div id="documents-list" class="documents-list">
+          <p class="empty-state">Loading documents...</p>
+        </div>
+
+        <!-- Stats -->
+        <div id="kb-stats" class="kb-stats hidden">
+          <span id="doc-count">0 documents</span>
+          <span class="separator">•</span>
+          <span id="doc-size">0 KB</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Learn Tab -->
+    <div id="learn-tab" class="tab-content">
+      <div class="learn-section">
+        <h3>Learn from Past Tickets</h3>
+        <p class="description">
+          Scan your resolved Freshdesk tickets to help the AI learn your response style and common solutions.
+        </p>
+
+        <div class="learn-options">
+          <label for="ticket-count">Number of tickets to learn from:</label>
+          <select id="ticket-count">
+            <option value="100">100 tickets</option>
+            <option value="250">250 tickets</option>
+            <option value="500">500 tickets</option>
+            <option value="1000">1000 tickets (max)</option>
+          </select>
+        </div>
+
+        <button id="start-learning" class="btn btn-primary btn-full">
+          <span class="btn-icon">📚</span>
+          Start Learning
+        </button>
+
+        <div id="learning-progress" class="learning-progress hidden">
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 0%"></div>
+          </div>
+          <p class="progress-text">Processing tickets...</p>
+        </div>
+
+        <div id="learning-status" class="learning-status">
+          <h4>Learning Status</h4>
+          <p id="tickets-learned">Tickets learned: <strong>0</strong></p>
+          <p id="last-learned">Last updated: <strong>Never</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Tab -->
+    <div id="settings-tab" class="tab-content">
+      <div class="settings-section">
+        <h3>Server Configuration</h3>
+        <div class="setting-item">
+          <label for="server-url">Server URL:</label>
+          <input type="text" id="server-url" placeholder="http://localhost:3000">
+        </div>
+        <button id="save-settings" class="btn btn-primary">Save Settings</button>
+        <button id="test-connection" class="btn btn-secondary">Test Connection</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>API Status</h3>
+        <div id="api-status" class="api-status">
+          <div class="api-item">
+            <span class="api-name">Freshdesk API</span>
+            <span id="freshdesk-status" class="api-indicator">❓</span>
+          </div>
+          <div class="api-item">
+            <span class="api-name">OpenAI API</span>
+            <span id="openai-status" class="api-indicator">❓</span>
+          </div>
+          <div class="api-item">
+            <span class="api-name">Shopify API</span>
+            <span id="shopify-status" class="api-indicator">❓</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>Help & Documentation</h3>
+        <a href="#" id="view-docs" class="help-link">📖 View Setup Guide</a>
+        <a href="#" id="view-api-docs" class="help-link">🔧 API Documentation</a>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <a href="#" id="need-help">Need help?</a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+/* Freshdesk AI Assistant - Content Script Styles */
+
+/* Notification Toast */
+.fd-ai-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  animation: fd-ai-slidein 0.3s ease;
+  max-width: 400px;
+}
+
+.fd-ai-notification.fd-ai-fadeout {
+  animation: fd-ai-slideout 0.3s ease forwards;
+}
+
+.fd-ai-notification.fd-ai-success {
+  border-left: 4px solid #22c55e;
+}
+
+.fd-ai-notification.fd-ai-error {
+  border-left: 4px solid #ef4444;
+}
+
+.fd-ai-notification.fd-ai-info {
+  border-left: 4px solid #3b82f6;
+}
+
+.fd-ai-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.fd-ai-success .fd-ai-icon {
+  background: #dcfce7;
+  color: #22c55e;
+}
+
+.fd-ai-error .fd-ai-icon {
+  background: #fee2e2;
+  color: #ef4444;
+}
+
+.fd-ai-info .fd-ai-icon {
+  background: #dbeafe;
+  color: #3b82f6;
+}
+
+.fd-ai-message {
+  flex: 1;
+  color: #333;
+}
+
+.fd-ai-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.fd-ai-close:hover {
+  color: #666;
+}
+
+@keyframes fd-ai-slidein {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fd-ai-slideout {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+/* AI Assistant floating button (optional) */
+.fd-ai-fab {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  z-index: 999998;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.fd-ai-fab:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+}
+
+/* Quick reply panel */
+.fd-ai-panel {
+  position: fixed;
+  bottom: 90px;
+  right: 20px;
+  width: 350px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  z-index: 999997;
+  overflow: hidden;
+  animation: fd-ai-panelopen 0.3s ease;
+}
+
+.fd-ai-panel.hidden {
+  display: none;
+}
+
+.fd-ai-panel-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px;
+  font-weight: 600;
+}
+
+.fd-ai-panel-content {
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+@keyframes fd-ai-panelopen {
+  from {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
