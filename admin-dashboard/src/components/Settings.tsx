@@ -84,9 +84,29 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           onChange={(e) => setFreshdeskApiKey(e.target.value)}
           placeholder="Your Freshdesk API key"
         />
-        <small style={{ color: '#666', fontSize: '0.85rem' }}>
-          Find this in Freshdesk &gt; Profile Settings &gt; API Key
-        </small>
+        <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#f0f7ff', borderRadius: '6px', border: '1px solid #d0e3ff' }}>
+          <strong style={{ fontSize: '0.85rem', color: '#1a56db' }}>How to find your API Key:</strong>
+          <ol style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.8rem', color: '#444', lineHeight: '1.6' }}>
+            <li>Log in to your Freshdesk account</li>
+            <li>Click your <strong>profile picture</strong> (top right corner)</li>
+            <li>Select <strong>"Profile Settings"</strong></li>
+            <li>Scroll down to find <strong>"Your API Key"</strong></li>
+            <li>Copy the API key and paste it here</li>
+          </ol>
+          {freshdeskDomain && (
+            <a
+              href={`https://${freshdeskDomain.replace(/^https?:\/\//, '')}/a/profile/settings`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.8rem', color: '#1a56db' }}
+            >
+              Open your Freshdesk Profile Settings →
+            </a>
+          )}
+          <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', color: '#666' }}>
+            <strong>Note:</strong> Each user needs their own API key from their Freshdesk account.
+          </p>
+        </div>
       </div>
 
       <button type="submit" className="btn btn-primary" disabled={loading}>
