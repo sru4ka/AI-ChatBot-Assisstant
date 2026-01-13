@@ -22,6 +22,8 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
   const [learnError, setLearnError] = useState<string | null>(null)
   const [learnSuccess, setLearnSuccess] = useState<string | null>(null)
   const [history, setHistory] = useState<LearningHistoryItem[]>([])
+  const [elapsedTime, setElapsedTime] = useState(0)
+  const [learningStartTime, setLearningStartTime] = useState<number | null>(null)
 
   const freshdeskDomain = business.freshdesk_domain
   const freshdeskApiKey = business.freshdesk_api_key
@@ -40,6 +42,44 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
     }
   }, [business.id])
 
+  // Track elapsed time during learning
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null
+    if (learningTickets && learningStartTime) {
+      interval = setInterval(() => {
+        setElapsedTime(Math.floor((Date.now() - learningStartTime) / 1000))
+      }, 1000)
+    } else {
+      setElapsedTime(0)
+    }
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+  }, [learningTickets, learningStartTime])
+
+  // Estimate time based on ticket count (roughly 2-3 seconds per ticket for API calls)
+  function getEstimatedTime(count: number): string {
+    const baseSeconds = Math.ceil(count * 0.8) // ~0.8 seconds per ticket (API rate limits)
+    const minutes = Math.floor(baseSeconds / 60)
+    const seconds = baseSeconds % 60
+    if (minutes === 0) return `~${seconds} seconds`
+    if (minutes === 1) return `~1-2 minutes`
+    return `~${minutes}-${minutes + 1} minutes`
+  }
+
+  function formatElapsedTime(seconds: number): string {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    if (mins === 0) return `${secs}s`
+    return `${mins}m ${secs}s`
+  }
+
+  function getProgressPercentage(): number {
+    // Estimate progress based on typical timing
+    const estimatedSeconds = Math.ceil(ticketCount * 0.8)
+    return Math.min(95, Math.floor((elapsedTime / estimatedSeconds) * 100))
+  }
+
   // Save history to localStorage
   function saveHistory(newHistory: LearningHistoryItem[]) {
     const storageKey = `learning-history-${business.id}`
@@ -56,6 +96,7 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
     setLearningTickets(true)
     setLearnError(null)
     setLearnSuccess(null)
+    setLearningStartTime(Date.now())
 
     const startTime = new Date()
 
@@ -113,6 +154,7 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
       setLearnError(errorMessage)
     } finally {
       setLearningTickets(false)
+      setLearningStartTime(null)
     }
   }
 
@@ -160,7 +202,14 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
                 <option value={250}>250 tickets</option>
                 <option value={500}>500 tickets</option>
                 <option value={1000}>1000 tickets</option>
+                <option value={2000}>2000 tickets</option>
+                <option value={2500}>2500 tickets</option>
               </select>
+              {!learningTickets && (
+                <small style={{ display: 'block', marginTop: '0.5rem', color: '#666', fontSize: '0.8rem' }}>
+                  Estimated time: {getEstimatedTime(ticketCount)}
+                </small>
+              )}
             </div>
 
             <button
@@ -182,6 +231,49 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
               )}
             </button>
           </div>
+
+          {/* Learning Progress Indicator */}
+          {learningTickets && (
+            <div className="learning-progress" style={{
+              background: '#f0f9ff',
+              border: '1px solid #bae6fd',
+              borderRadius: '12px',
+              padding: '1.25rem',
+              marginBottom: '1rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <span style={{ fontWeight: '600', color: '#0369a1' }}>
+                  Processing {ticketCount} tickets...
+                </span>
+                <span style={{ fontSize: '0.85rem', color: '#0284c7' }}>
+                  {formatElapsedTime(elapsedTime)} elapsed
+                </span>
+              </div>
+
+              {/* Progress Bar */}
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: '#e0f2fe',
+                borderRadius: '4px',
+                overflow: 'hidden',
+                marginBottom: '0.5rem',
+              }}>
+                <div style={{
+                  width: `${getProgressPercentage()}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #0284c7, #0ea5e9)',
+                  borderRadius: '4px',
+                  transition: 'width 1s ease-out',
+                }} />
+              </div>
+
+              <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Scanning tickets, fetching conversations, creating embeddings...</span>
+                <span>~{getProgressPercentage()}%</span>
+              </div>
+            </div>
+          )}
 
           <div className="learn-info">
             <h4>What this does:</h4>

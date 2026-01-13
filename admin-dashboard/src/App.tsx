@@ -6,6 +6,7 @@ import Settings from './components/Settings'
 import TestArea from './components/TestArea'
 import DocumentUpload from './components/DocumentUpload'
 import LearnFromTickets from './components/LearnFromTickets'
+import WebsiteOverview from './components/WebsiteOverview'
 
 type Page = 'dashboard' | 'upload' | 'settings'
 
@@ -194,6 +195,14 @@ function App() {
                 <div className="page-header">
                   <h2>Dashboard</h2>
                   <p>Test AI responses and manage your knowledge base</p>
+                </div>
+
+                {/* Website Quick Overview */}
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <WebsiteOverview
+                    websiteUrl={(business as any).website_url}
+                    onConfigureClick={() => setCurrentPage('settings')}
+                  />
                 </div>
 
                 <div className="dashboard-grid">

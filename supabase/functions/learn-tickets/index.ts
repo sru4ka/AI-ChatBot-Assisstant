@@ -36,15 +36,17 @@ interface FreshdeskConversation {
 async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
   const perPage = 100
   const tickets: FreshdeskTicket[] = []
+  const existingIds = new Set<number>()
 
   console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
   // Method 1: Use search API to find resolved and closed tickets
+  // Freshdesk Search API returns max 30 results per page, max 10 pages (300 per status)
   for (const status of [5, 4]) { // Prioritize closed (5) since resolved (4) become closed
     if (tickets.length >= count) break
 
     let page = 1
-    const maxPages = Math.ceil(count / 30) // Search API returns 30 per page
+    const maxPages = 10 // Freshdesk search limit
 
     while (page <= maxPages && tickets.length < count) {
       try {
@@ -69,8 +71,12 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
           break
         }
 
-        console.log(`Found ${data.results.length} tickets with status ${status} on page ${page}`)
-        tickets.push(...data.results)
+        // Filter out duplicates
+        const newTickets = data.results.filter((t: FreshdeskTicket) => !existingIds.has(t.id))
+        newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+        tickets.push(...newTickets)
+
+        console.log(`Found ${newTickets.length} tickets with status ${status} on page ${page}`)
         page++
 
         // Freshdesk rate limit: 50 requests per minute for search
@@ -86,11 +92,14 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
   console.log(`Search API found ${tickets.length} tickets total`)
 
   // Method 2: If search didn't find enough, use standard tickets API with filter
+  // Standard API can return 100 per page, we'll go up to 50 pages (5000 tickets to check)
   if (tickets.length < count) {
     console.log('Supplementing with standard tickets API...')
-    const existingIds = new Set(tickets.map(t => t.id))
 
-    for (let page = 1; page <= 20 && tickets.length < count; page++) {
+    const maxPages = Math.ceil((count * 2) / perPage) // Check 2x the needed amount
+    let consecutiveEmptyPages = 0
+
+    for (let page = 1; page <= maxPages && tickets.length < count; page++) {
       try {
         const response = await fetch(
           `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
@@ -108,7 +117,13 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
         }
 
         const data = await response.json()
-        if (!data || data.length === 0) break
+        if (!data || data.length === 0) {
+          consecutiveEmptyPages++
+          if (consecutiveEmptyPages >= 2) break
+          continue
+        }
+
+        consecutiveEmptyPages = 0
 
         // Filter for resolved (4) or closed (5) tickets we don't already have
         const newTickets = data.filter((t: FreshdeskTicket) =>
@@ -118,10 +133,10 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
         newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
         tickets.push(...newTickets)
 
-        console.log(`Page ${page}: found ${newTickets.length} new resolved/closed tickets`)
+        console.log(`Page ${page}: found ${newTickets.length} new resolved/closed tickets (total: ${tickets.length})`)
 
-        // Rate limit
-        await new Promise(resolve => setTimeout(resolve, 100))
+        // Rate limit - standard API limit is higher but be safe
+        await new Promise(resolve => setTimeout(resolve, 80))
 
       } catch (err) {
         console.error(`Error fetching page ${page}:`, err)
@@ -217,7 +232,7 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const count = Math.min(Math.max(ticketCount || 100, 10), 1000)
+    const count = Math.min(Math.max(ticketCount || 100, 10), 2500)
 
     console.log(`Fetching ${count} tickets from ${freshdeskDomain}...`)
 
@@ -260,28 +275,38 @@ Deno.serve(async (req: Request) => {
         if (ticket.status >= 4) {
           const conversations = await fetchConversations(freshdeskDomain, freshdeskApiKey, ticket.id)
 
-          if (conversations.length > 0) {
-            // Build a Q&A document from the ticket
-            let doc = `TICKET: ${ticket.subject}\n\n`
-            doc += `CUSTOMER QUERY:\n${ticket.description_text}\n\n`
+          // Build a Q&A document from the ticket
+          let doc = `TICKET: ${ticket.subject}\n\n`
 
-            // Get agent responses (non-incoming messages)
-            const agentResponses = conversations.filter(c => !c.incoming)
-            if (agentResponses.length > 0) {
-              doc += `SUPPORT RESPONSE:\n`
-              agentResponses.forEach(resp => {
-                doc += `${resp.body_text}\n\n`
-              })
-              learningDocs.push(doc)
-              conversationCount++
-            }
+          // Add the initial customer query if it exists
+          if (ticket.description_text && ticket.description_text.trim()) {
+            doc += `CUSTOMER QUERY:\n${ticket.description_text}\n\n`
+          }
+
+          // Get agent responses (non-incoming messages)
+          const agentResponses = conversations.filter(c => !c.incoming && c.body_text && c.body_text.trim())
+
+          if (agentResponses.length > 0) {
+            doc += `SUPPORT RESPONSE:\n`
+            agentResponses.forEach(resp => {
+              doc += `${resp.body_text}\n\n`
+            })
+            learningDocs.push(doc)
+            conversationCount++
+          } else if (ticket.description_text && ticket.description_text.trim().length > 50) {
+            // Even without agent response, a resolved ticket's query is valuable
+            // (It shows what types of queries get resolved)
+            // Only include if description is substantial (>50 chars)
+            doc += `[Ticket was resolved - response may have been sent via other channel]\n\n`
+            learningDocs.push(doc)
+            conversationCount++
           }
         }
         processedCount++
 
         // Rate limiting - Freshdesk API limits
         if (processedCount % 10 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 200))
+          await new Promise(resolve => setTimeout(resolve, 150))
         }
       } catch (err) {
         console.warn(`Error processing ticket ${ticket.id}:`, err)
