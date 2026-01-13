@@ -2,7 +2,7 @@ import { createClient, SupabaseClient, User } from '@supabase/supabase-js'
 
 // Hardcoded Supabase configuration
 const SUPABASE_URL = 'https://iyeqiwixenjiakeisdae.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_gx-_bqwBK-ghrRnXxf6b4g_cA6mfMkF'
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc'
 
 let supabase: SupabaseClient | null = null
 
