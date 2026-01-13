@@ -256,11 +256,12 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
         )}
       </div>
 
-      {/* Business ID display for extension configuration */}
+      {/* Business ID display for reference */}
       <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8f9ff', borderRadius: '8px' }}>
         <strong>Your Business ID</strong>
         <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
-          Use this ID when configuring the Chrome extension:
+          This ID is automatically linked to your account. You don't need to configure it manually -
+          just log in to the Chrome extension using the same email and password you use here.
         </p>
         <code style={{
           display: 'block',
@@ -274,6 +275,9 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
         }}>
           {business.id}
         </code>
+        <small style={{ display: 'block', marginTop: '0.5rem', color: '#888' }}>
+          (Shown for reference/debugging only)
+        </small>
       </div>
     </div>
   )

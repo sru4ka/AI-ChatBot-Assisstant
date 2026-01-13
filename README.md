@@ -217,19 +217,41 @@ Load in Chrome:
 4. Scroll down to find **"Your API Key"**
 5. Copy the API key
 
-### Shopify Access Token (Optional)
+### Shopify Admin API Access Token (Optional)
 
-1. Go to Shopify Admin → **Settings** → **Apps and sales channels**
-2. Click **"Develop apps"** (may need to enable first)
-3. Click **"Create an app"** and name it "Freshdesk AI"
-4. Go to **Configuration** → **Admin API integration**
-5. Click **"Configure Admin API scopes"**
-6. Enable these scopes:
-   - `read_orders`
-   - `read_customers`
-   - `read_fulfillments`
-7. Click **Save** then **Install app**
-8. Click **"Reveal token once"** and copy the Admin API access token
+The Shopify Access Token lets the AI include order information when answering customer questions.
+
+**Step 1: Open the Dev Dashboard**
+1. Log in to your Shopify Admin
+2. Go to **Settings** → **Apps and sales channels**
+3. Click the **"Build apps in Dev Dashboard"** button (or "Develop apps" if shown)
+4. This opens Shopify's App Development dashboard at `partners.shopify.com`
+
+**Step 2: Create a Custom App**
+1. In the Dev Dashboard, click **"Create an app"**
+2. Name it something like "Freshdesk AI Integration"
+3. Click **"Create app"**
+
+**Step 3: Configure API Scopes**
+1. Go to the **Configuration** tab
+2. Under **Admin API integration**, click **"Configure"**
+3. Search for and enable these scopes:
+   - `read_orders` - View order details
+   - `read_customers` - View customer info
+   - `read_fulfillments` - View shipping status
+4. Click **Save**
+
+**Step 4: Install and Get Token**
+1. Go to the **API credentials** tab
+2. Click **"Install app"** to install it on your store
+3. In the **Admin API access token** section, click **"Reveal token once"**
+4. **Copy the token immediately** - it starts with `shpat_` and is only shown once!
+
+**Important Notes:**
+- As of January 2026, Shopify uses the new **Dev Dashboard** (not "Legacy custom apps")
+- If you see "Legacy custom apps" in your dashboard, you can still use existing apps but should create new ones in Dev Dashboard
+- The token format is `shpat_` followed by random characters (e.g., `shpat_abc123xyz...`)
+- If you lose the token, you'll need to rotate it (generate a new one)
 
 ---
 
@@ -290,34 +312,79 @@ Load in Chrome:
 
 ### "Edge Function returned a non-2xx status code"
 
-This means the Edge Functions aren't deployed. Run:
+This error means the Edge Function failed. Here's how to diagnose and fix it:
+
+**Step 1: Check if functions are deployed**
+Go to your Supabase Dashboard → Edge Functions. You should see:
+- `generate-reply`
+- `ingest-document`
+- `learn-tickets`
+- `shopify-orders`
+
+If any are missing, deploy them (see Step 2).
+
+**Step 2: Deploy functions (without Docker)**
+
+If the CLI says "Docker Desktop is a prerequisite", deploy directly via Supabase Dashboard:
+
+1. Go to https://supabase.com/dashboard/project/YOUR_PROJECT_REF/functions
+2. Click **"Create a new function"**
+3. For each function:
+   - Enter the function name (e.g., `generate-reply`)
+   - Copy the code from `supabase/functions/[name]/index.ts`
+   - **Uncheck "Verify JWT"** (important!)
+   - Click **Deploy**
+
+**Step 3: Check OpenAI API key is set**
+
+The functions need an OpenAI API key. Set it via CLI:
 ```bash
-npx supabase functions deploy generate-reply --legacy-bundle --no-verify-jwt
-npx supabase functions deploy ingest-document --legacy-bundle --no-verify-jwt
+npx supabase secrets set OPENAI_API_KEY=sk-your-key-here
 ```
+
+Or in Dashboard → Edge Functions → select function → **Secrets** → Add `OPENAI_API_KEY`.
+
+**Step 4: Check function logs**
+
+Go to Supabase Dashboard → Edge Functions → select the failing function → **Logs**.
+Look for error messages that explain what's wrong.
+
+**Common causes:**
+- Missing `OPENAI_API_KEY` secret
+- Function not deployed
+- Database tables not created (run the SQL from Step 2)
+- Invalid API key (expired or incorrect)
 
 ### "Docker Desktop is a prerequisite"
 
-You don't need Docker for production deployment. Use `--legacy-bundle` flag:
-```bash
-npx supabase functions deploy generate-reply --legacy-bundle --no-verify-jwt
-```
+This appears when deploying via CLI. **You don't need Docker** - deploy directly through the Supabase Dashboard instead (see above).
 
-### Extension can't find ticket content
+### "Error creating business: [object Object]"
 
-Freshdesk may update their DOM structure. Check `extension/src/utils/freshdesk.ts` and update the selectors if needed.
+This usually means:
+1. The `businesses` table doesn't exist - run the SQL from "Step 2: Run Database Setup SQL"
+2. Row Level Security is blocking the insert - make sure RLS policies are created
+3. User already has a business (not an error - can be ignored)
+
+### Extension can't find ticket content / "Receiving end does not exist"
+
+1. **Reload the extension**: Go to `chrome://extensions/`, find the extension, click the refresh icon
+2. **Refresh Freshdesk**: Close and reopen the Freshdesk ticket page
+3. **Check you're on a ticket**: The extension only works on individual ticket pages, not the ticket list
 
 ### Document upload fails
 
-- Ensure document size is under 100KB
-- Check that the business ID exists in the database
-- Verify the Edge Function is deployed
+- Ensure document size is under 100KB (for text) or 10MB (for PDF/Word)
+- Make sure you're logged in to the Admin Dashboard
+- Check Edge Function logs for specific errors
+- Verify the `ingest-document` function is deployed
 
-### AI replies are generic
+### AI replies are generic / not using knowledge base
 
-- Upload more relevant documents to the knowledge base
-- Use "Learn from Past Tickets" to train on your actual responses
-- Make sure documents contain specific information about your products/services
+1. **Upload documents first**: Go to Admin Dashboard → Upload Documents
+2. **Use "Learn from Past Tickets"**: This trains the AI on your actual responses
+3. **Check documents exist**: Go to Admin Dashboard and verify documents are listed
+4. **Check for content**: Documents need actual text content, not just titles
 
 ---
 
