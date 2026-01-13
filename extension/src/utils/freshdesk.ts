@@ -18,9 +18,12 @@ const SELECTORS = {
     '.content-wrapper',
     'article',
     '.ticket__content',
+    '#ticket-details',
+    '.ticket-detail-page',
+    '[class*="thread"]',
   ],
 
-  // Customer messages (incoming)
+  // Customer messages (incoming) - updated for newer Freshdesk UI
   customerMessage: [
     '.incoming-msg',
     '.customer-reply',
@@ -31,9 +34,14 @@ const SELECTORS = {
     '[class*="customer"]',
     '.reported-message',
     '[class*="requester"]',
+    '.thread-message.incoming',
+    '.message-thread .incoming',
+    '[class*="inbound"]',
+    '.ticket-message',
+    '.conv-content',
   ],
 
-  // Reply text area
+  // Reply text area - updated for Freshdesk's current editors
   replyTextArea: [
     '.reply-box textarea',
     '.fr-element',
@@ -42,15 +50,27 @@ const SELECTORS = {
     'textarea[name*="reply"]',
     '.note-editable',
     '[contenteditable="true"]',
+    '.ql-editor',
+    '.tox-edit-area__iframe',
+    '.reply-editor textarea',
+    '#reply-editor',
+    '.cke_editable',
+    '.ProseMirror',
   ],
 
-  // Rich text editor (Froala or Redactor)
+  // Rich text editor (Froala, Redactor, TinyMCE, etc.)
   richTextEditor: [
     '.fr-element.fr-view',
     '.redactor-editor',
-    '[contenteditable="true"]',
-    '.fr-wrapper [contenteditable]',
+    '.fr-wrapper [contenteditable="true"]',
     '.note-editable',
+    '.ql-editor',
+    '.ProseMirror',
+    '.cke_editable',
+    '[contenteditable="true"][class*="editor"]',
+    '[contenteditable="true"][class*="reply"]',
+    '[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"]',
   ],
 
   // Subject/ticket info
@@ -62,9 +82,11 @@ const SELECTORS = {
     '.ticket-header h1',
     '[class*="subject"]',
     '.ticket__subject',
+    '#ticket-subject',
+    '.ticket-title',
   ],
 
-  // Message content containers
+  // Message content containers - updated for email body
   messageContent: [
     '.message-text',
     '.content-text',
@@ -73,10 +95,15 @@ const SELECTORS = {
     '.message-body',
     '.ticket-description',
     '.description-text',
-    'blockquote',
     '.message__body',
     '[class*="message-content"]',
     '[class*="description"]',
+    '.thread-body',
+    '.conv-text',
+    '.email-body',
+    '.ticket-body-content',
+    '.fr-view',
+    '.email-content',
   ],
 }
 
@@ -135,6 +162,26 @@ export function isOnTicketPage(): boolean {
 export function getLatestCustomerMessage(): string | null {
   console.log('Freshdesk AI: Scanning for customer message...')
 
+  // Metadata patterns to filter out (these are NOT the actual message)
+  const metadataPatterns = [
+    /^New customer message on/i,
+    /^\d{1,2}\/\d{1,2}\/\d{4}/,
+    /^Status:/i,
+    /^Priority:/i,
+    /^Type:/i,
+    /^Group:/i,
+    /^Agent:/i,
+    /^Tags:/i,
+  ]
+
+  function isMetadata(text: string): boolean {
+    const trimmed = text.trim()
+    return metadataPatterns.some(p => p.test(trimmed)) ||
+      trimmed.length < 20 ||
+      /^\d+\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(trimmed) ||
+      /^#\d+\s+\d+/.test(trimmed)
+  }
+
   // First, try to find the conversation area
   let conversationArea = queryWithFallback(SELECTORS.ticketConversation)
 
@@ -143,7 +190,17 @@ export function getLatestCustomerMessage(): string | null {
     conversationArea = document.body
   }
 
-  // Strategy 1: Look for specific customer message elements
+  // Strategy 1: Look for Freshdesk's fr-view class (Froala editor view - common for message display)
+  const frViews = conversationArea.querySelectorAll('.fr-view')
+  for (const frView of frViews) {
+    const text = cleanMessageText(frView.textContent || '')
+    if (text.length > 30 && !isMetadata(text)) {
+      console.log('Freshdesk AI: Found message via fr-view')
+      return text
+    }
+  }
+
+  // Strategy 2: Look for specific customer message elements
   const customerMessages = queryAllWithFallback(SELECTORS.customerMessage, conversationArea)
   console.log(`Freshdesk AI: Found ${customerMessages.length} potential customer messages`)
 
@@ -153,20 +210,20 @@ export function getLatestCustomerMessage(): string | null {
     const content = queryWithFallback(SELECTORS.messageContent, latestMessage)
     if (content && content.textContent) {
       const text = cleanMessageText(content.textContent)
-      if (text.length > 20) {
+      if (text.length > 20 && !isMetadata(text)) {
         console.log('Freshdesk AI: Found message via customer message selector')
         return text
       }
     }
     // Fallback to the full element text
     const msgText = cleanMessageText(latestMessage.textContent || '')
-    if (msgText.length > 20) {
+    if (msgText.length > 20 && !isMetadata(msgText)) {
       console.log('Freshdesk AI: Found message via customer message element text')
       return msgText
     }
   }
 
-  // Strategy 2: Look for message content elements directly
+  // Strategy 3: Look for message content elements directly
   const messageContents = queryAllWithFallback(SELECTORS.messageContent, conversationArea)
   console.log(`Freshdesk AI: Found ${messageContents.length} message content elements`)
 
@@ -174,14 +231,25 @@ export function getLatestCustomerMessage(): string | null {
     // Get the first substantial message (likely the customer's initial message)
     for (const msgEl of messageContents) {
       const text = cleanMessageText(msgEl.textContent || '')
-      if (text.length > 30) {
+      if (text.length > 30 && !isMetadata(text)) {
         console.log('Freshdesk AI: Found message via content selector')
         return text
       }
     }
   }
 
-  // Strategy 3: Look for common text patterns in the page
+  // Strategy 4: Look for blockquote or email-like content
+  const emailSelectors = 'blockquote, .email-content, .ticket-description, .email-body, [class*="body"], [class*="content"]'
+  const emailElements = conversationArea.querySelectorAll(emailSelectors)
+  for (const el of emailElements) {
+    const text = cleanMessageText(el.textContent || '')
+    if (text.length > 50 && !isMetadata(text)) {
+      console.log('Freshdesk AI: Found message via email/blockquote selector')
+      return text
+    }
+  }
+
+  // Strategy 5: Look for common text patterns in the page
   const patterns = [
     /Comment:\s*([\s\S]+?)(?=\n\n|Tags:|$)/i,
     /Description:\s*([\s\S]+?)(?=\n\n|$)/i,
@@ -191,42 +259,32 @@ export function getLatestCustomerMessage(): string | null {
   const pageText = conversationArea.textContent || ''
   for (const pattern of patterns) {
     const match = pageText.match(pattern)
-    if (match && match[1] && match[1].trim().length > 20) {
+    if (match && match[1] && match[1].trim().length > 20 && !isMetadata(match[1])) {
       console.log('Freshdesk AI: Found message via text pattern matching')
       return cleanMessageText(match[1])
     }
   }
 
-  // Strategy 4: Look for blockquote or email-like content
-  const blockquotes = conversationArea.querySelectorAll('blockquote, .email-content, .ticket-description')
-  if (blockquotes.length > 0) {
-    const text = cleanMessageText(blockquotes[0].textContent || '')
-    if (text.length > 20) {
-      console.log('Freshdesk AI: Found message via blockquote')
-      return text
-    }
-  }
-
-  // Strategy 5: Get substantial text from the main content area
+  // Strategy 6: Get substantial text from the main content area
   // Find divs with substantial text content
-  const allDivs = conversationArea.querySelectorAll('div, p, td')
+  const allDivs = conversationArea.querySelectorAll('div, p, td, span')
   const substantialTexts: string[] = []
+
+  // UI text patterns to exclude
+  const uiPatterns = ['Reply', 'Forward', 'Delete', 'Close', 'Add note', 'RESOLUTION DUE',
+    'Pending', 'Open', 'Resolved', 'Closed', 'Priority', 'Status', 'Type', 'Group', 'Agent']
 
   allDivs.forEach(div => {
     const text = cleanMessageText(div.textContent || '')
     // Look for text that seems like a customer message (not UI text)
     if (text.length > 50 &&
-        !text.includes('Reply') &&
-        !text.includes('Forward') &&
-        !text.includes('Delete') &&
-        !text.includes('Close') &&
-        !text.includes('Add note') &&
-        !text.includes('RESOLUTION DUE')) {
+        !isMetadata(text) &&
+        !uiPatterns.some(p => text.startsWith(p))) {
       substantialTexts.push(text)
     }
   })
 
-  // Sort by length and get the most substantial one
+  // Sort by length and get the most substantial one that looks like actual content
   if (substantialTexts.length > 0) {
     substantialTexts.sort((a, b) => b.length - a.length)
     console.log('Freshdesk AI: Found message via substantial text search')
@@ -274,52 +332,77 @@ export function getTicketSubject(): string | null {
 export function insertReply(text: string): boolean {
   console.log('Freshdesk AI: Attempting to insert reply...')
 
-  // Try rich text editor first (Froala/Redactor)
-  const richEditor = queryWithFallback(SELECTORS.richTextEditor) as HTMLElement
-  if (richEditor && richEditor.getAttribute('contenteditable') === 'true') {
-    console.log('Freshdesk AI: Found rich text editor')
-    richEditor.focus()
-
+  // Helper to insert into an editor
+  function insertIntoEditor(editor: HTMLElement): boolean {
+    editor.focus()
     // Clear existing content and insert new
-    richEditor.innerHTML = text.replace(/\n/g, '<br>')
-
-    // Trigger input event
-    richEditor.dispatchEvent(new Event('input', { bubbles: true }))
-    richEditor.dispatchEvent(new Event('change', { bubbles: true }))
-
+    editor.innerHTML = text.replace(/\n/g, '<br>')
+    // Trigger all possible events to notify Freshdesk of the change
+    editor.dispatchEvent(new Event('input', { bubbles: true }))
+    editor.dispatchEvent(new Event('change', { bubbles: true }))
+    editor.dispatchEvent(new Event('keyup', { bubbles: true }))
+    editor.dispatchEvent(new Event('blur', { bubbles: true }))
     return true
   }
 
-  // Try regular textarea
+  // Strategy 1: Look for Froala editor (very common in Freshdesk)
+  const froalaEditor = document.querySelector('.fr-element.fr-view') as HTMLElement
+  if (froalaEditor && froalaEditor.getAttribute('contenteditable') === 'true') {
+    console.log('Freshdesk AI: Found Froala editor')
+    return insertIntoEditor(froalaEditor)
+  }
+
+  // Strategy 2: Look for any contenteditable in the reply area
+  const replyAreas = document.querySelectorAll('.reply-box, .reply-editor, [class*="reply"], [class*="editor-wrapper"]')
+  for (const area of replyAreas) {
+    const editor = area.querySelector('[contenteditable="true"]') as HTMLElement
+    if (editor) {
+      console.log('Freshdesk AI: Found contenteditable in reply area')
+      return insertIntoEditor(editor)
+    }
+  }
+
+  // Strategy 3: Try rich text editor from selectors
+  const richEditor = queryWithFallback(SELECTORS.richTextEditor) as HTMLElement
+  if (richEditor && richEditor.getAttribute('contenteditable') === 'true') {
+    console.log('Freshdesk AI: Found rich text editor via selector')
+    return insertIntoEditor(richEditor)
+  }
+
+  // Strategy 4: Try regular textarea
   const textarea = queryWithFallback(SELECTORS.replyTextArea) as HTMLTextAreaElement
-  if (textarea) {
+  if (textarea && textarea.tagName === 'TEXTAREA') {
     console.log('Freshdesk AI: Found textarea')
     textarea.focus()
     textarea.value = text
-
-    // Trigger events to notify Freshdesk of the change
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
     textarea.dispatchEvent(new Event('change', { bubbles: true }))
-
     return true
   }
 
-  // Try clicking the Reply button first to open the reply area
-  const replyButton = document.querySelector('button[title*="Reply"], [class*="reply-btn"], a[title*="Reply"]')
-  if (replyButton) {
-    console.log('Freshdesk AI: Clicking reply button to open editor...')
-    ;(replyButton as HTMLElement).click()
+  // Strategy 5: Look for ANY contenteditable on the page that's visible
+  const allEditable = document.querySelectorAll('[contenteditable="true"]')
+  for (const el of allEditable) {
+    const htmlEl = el as HTMLElement
+    // Check if it's visible and looks like a reply area
+    const rect = htmlEl.getBoundingClientRect()
+    if (rect.width > 200 && rect.height > 50 && rect.bottom > 0) {
+      console.log('Freshdesk AI: Found visible contenteditable element')
+      return insertIntoEditor(htmlEl)
+    }
+  }
 
-    // Wait a bit and try again
-    setTimeout(() => {
-      const editor = queryWithFallback(SELECTORS.richTextEditor) as HTMLElement
-      if (editor) {
-        editor.innerHTML = text.replace(/\n/g, '<br>')
-        editor.dispatchEvent(new Event('input', { bubbles: true }))
-      }
-    }, 500)
+  // Strategy 6: Try clicking the Reply button first to open the reply area
+  const replyButtons = document.querySelectorAll('button[title*="Reply"], [class*="reply-btn"], a[title*="Reply"], button:contains("Reply"), [data-action="reply"]')
+  for (const btn of replyButtons) {
+    const htmlBtn = btn as HTMLElement
+    if (htmlBtn.offsetParent !== null) { // Check if visible
+      console.log('Freshdesk AI: Clicking reply button to open editor...')
+      htmlBtn.click()
 
-    return true
+      // Return true - the popup should notify user to try again after clicking
+      return false
+    }
   }
 
   console.log('Freshdesk AI: Could not find reply text area')
