@@ -1,5 +1,38 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase, Business } from '../lib/supabase'
+
+// Toast notification component
+function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onClose, 4000)
+    return () => clearTimeout(timer)
+  }, [onClose])
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '1rem 2rem',
+      borderRadius: '8px',
+      background: type === 'success' ? '#10b981' : '#ef4444',
+      color: 'white',
+      fontWeight: '500',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      zIndex: 9999,
+      animation: 'slideDown 0.3s ease-out',
+    }}>
+      {message}
+      <style>{`
+        @keyframes slideDown {
+          from { transform: translateX(-50%) translateY(-100%); opacity: 0; }
+          to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  )
+}
 
 interface SettingsProps {
   business: Business
@@ -12,9 +45,13 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
   const [freshdeskApiKey, setFreshdeskApiKey] = useState(business.freshdesk_api_key || '')
   const [shopifyDomain, setShopifyDomain] = useState((business as any).shopify_domain || '')
   const [shopifyAccessToken, setShopifyAccessToken] = useState((business as any).shopify_access_token || '')
+  const [websiteUrl, setWebsiteUrl] = useState((business as any).website_url || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  // Toast state
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   // Ticket learning state
   const [learningTickets, setLearningTickets] = useState(false)
@@ -37,6 +74,7 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           freshdesk_api_key: freshdeskApiKey || null,
           shopify_domain: shopifyDomain || null,
           shopify_access_token: shopifyAccessToken || null,
+          website_url: websiteUrl || null,
         })
         .eq('id', business.id)
         .select()
@@ -46,9 +84,11 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
 
       onUpdate(data)
       setSuccess(true)
+      setToast({ message: 'Settings saved successfully!', type: 'success' })
       setTimeout(() => setSuccess(false), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update settings')
+      setToast({ message: 'Failed to save settings', type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -92,6 +132,15 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
 
   return (
     <div>
+      {/* Toast notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <form className="settings-form" onSubmit={handleSubmit}>
         {error && <div className="error-message">{error}</div>}
         {success && <div className="success-message">Settings saved successfully!</div>}
@@ -200,6 +249,28 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
                 <li>Copy the <strong>Admin API access token</strong> (starts with shpat_)</li>
               </ol>
             </div>
+          </div>
+        </div>
+
+        {/* Website URL */}
+        <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f5f3ff', borderRadius: '8px', border: '1px solid #c4b5fd' }}>
+          <h4 style={{ marginBottom: '1rem', color: '#5b21b6' }}>Website URL (Optional)</h4>
+          <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '1rem' }}>
+            Add your website URL so the AI can reference it when answering questions.
+          </p>
+
+          <div className="form-group">
+            <label htmlFor="websiteUrl">Website URL</label>
+            <input
+              id="websiteUrl"
+              type="url"
+              value={websiteUrl}
+              onChange={(e) => setWebsiteUrl(e.target.value)}
+              placeholder="https://www.yourwebsite.com"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Your main website (e.g., https://www.ergonomiclux.com)
+            </small>
           </div>
         </div>
 

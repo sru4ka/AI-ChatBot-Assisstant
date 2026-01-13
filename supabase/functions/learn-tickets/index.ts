@@ -30,30 +30,77 @@ interface FreshdeskConversation {
 }
 
 /**
- * Fetch tickets from Freshdesk API
+ * Fetch RESOLVED tickets from Freshdesk API using filter
+ * Status 4 = Resolved, Status 5 = Closed
  */
 async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
   const perPage = Math.min(count, 100)
-  const pages = Math.ceil(count / perPage)
   const tickets: FreshdeskTicket[] = []
 
-  for (let page = 1; page <= pages && tickets.length < count; page++) {
-    const response = await fetch(
-      `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=created_at&order_type=desc`,
-      {
-        headers: {
-          'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-          'Content-Type': 'application/json',
-        },
+  // Fetch resolved tickets (status 4) and closed tickets (status 5)
+  for (const status of [4, 5]) {
+    let page = 1
+    while (tickets.length < count) {
+      const response = await fetch(
+        `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+        {
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+
+      if (!response.ok) {
+        // If search API fails, fall back to regular API with filter
+        console.log(`Search API failed for status ${status}, trying filter API...`)
+        break
       }
-    )
 
-    if (!response.ok) {
-      throw new Error(`Freshdesk API error: ${response.status} ${response.statusText}`)
+      const data = await response.json()
+      if (!data.results || data.results.length === 0) break
+
+      tickets.push(...data.results)
+      page++
+
+      // Freshdesk search API rate limit
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      if (data.results.length < 30) break // Less than page size means no more results
     }
+  }
 
-    const data = await response.json()
-    tickets.push(...data)
+  // If search didn't work well, fall back to fetching all and filtering
+  if (tickets.length < 10) {
+    console.log('Falling back to standard tickets API...')
+    const pages = Math.ceil(count / perPage)
+
+    for (let page = 1; page <= pages * 2; page++) {
+      const response = await fetch(
+        `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc`,
+        {
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error(`Freshdesk API error: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      if (!data || data.length === 0) break
+
+      // Filter for resolved/closed tickets
+      const resolvedTickets = data.filter((t: FreshdeskTicket) => t.status >= 4)
+      tickets.push(...resolvedTickets)
+
+      if (tickets.length >= count) break
+
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
   }
 
   return tickets.slice(0, count)

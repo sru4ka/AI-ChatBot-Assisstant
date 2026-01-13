@@ -18,6 +18,7 @@ export interface Business {
   freshdesk_api_key: string | null
   shopify_domain: string | null
   shopify_access_token: string | null
+  website_url: string | null
   created_at: string
 }
 
