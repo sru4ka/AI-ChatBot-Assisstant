@@ -1,18 +1,29 @@
-/* Floating AI Assistant button */
-.freshdesk-ai-floating-btn {
+/* Container positioning */
+#freshdesk-ai-reply-container {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   position: fixed;
   bottom: 20px;
   right: 20px;
   z-index: 999999;
-  padding: 12px 20px;
+}
+
+/* Button group */
+.freshdesk-ai-btn-group {
+  display: flex;
+  border-radius: 25px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+/* Main floating button */
+.freshdesk-ai-floating-btn {
+  padding: 12px 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  border-radius: 25px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
   transition: all 0.3s ease;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   display: flex;
@@ -20,25 +31,147 @@
   gap: 8px;
 }
 
-.freshdesk-ai-floating-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+.freshdesk-ai-main-btn {
+  border-radius: 25px 0 0 25px;
 }
 
-.freshdesk-ai-floating-btn:active {
-  transform: translateY(0);
+.freshdesk-ai-floating-btn:hover {
+  filter: brightness(1.1);
 }
 
 .freshdesk-ai-floating-btn .btn-icon {
   font-size: 16px;
 }
 
+/* Dropdown toggle button */
+.freshdesk-ai-dropdown-toggle {
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+  color: white;
+  border: none;
+  border-left: 1px solid rgba(255,255,255,0.2);
+  cursor: pointer;
+  font-size: 10px;
+  transition: all 0.3s ease;
+  border-radius: 0 25px 25px 0;
+}
+
+.freshdesk-ai-dropdown-toggle:hover {
+  filter: brightness(1.1);
+}
+
+/* Dropdown menu */
+.freshdesk-ai-dropdown {
+  position: absolute;
+  bottom: 55px;
+  right: 0;
+  width: 280px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  animation: slideUp 0.2s ease;
+  overflow: hidden;
+}
+
+.freshdesk-ai-dropdown.hidden {
+  display: none;
+}
+
+.dropdown-section {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.dropdown-section:last-of-type {
+  border-bottom: none;
+}
+
+.dropdown-section label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 10px;
+}
+
+.dropdown-tone-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.dropdown-tone-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 12px;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #374151;
+}
+
+.dropdown-tone-btn:hover {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.dropdown-tone-btn.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+}
+
+.dropdown-section textarea {
+  width: 100%;
+  min-height: 70px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.dropdown-section textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.dropdown-section textarea::placeholder {
+  color: #9ca3af;
+}
+
+.dropdown-footer {
+  padding: 12px 16px;
+  background: #f9fafb;
+  border-top: 1px solid #e9ecef;
+}
+
+.dropdown-save-btn {
+  width: 100%;
+  padding: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropdown-save-btn:hover {
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 /* Reply panel */
 .freshdesk-ai-panel {
-  position: fixed;
-  bottom: 80px;
-  right: 20px;
-  z-index: 999998;
+  position: absolute;
+  bottom: 55px;
+  right: 0;
   width: 400px;
   max-width: calc(100vw - 40px);
   background: white;
@@ -226,9 +359,4 @@
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* Container positioning */
-#freshdesk-ai-reply-container {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }

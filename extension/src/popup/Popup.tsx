@@ -220,9 +220,15 @@ export default function Popup() {
     setSources([])
 
     try {
-      const response = await new Promise<{ success: boolean; customerMessage?: string; ticketSubject?: string; error?: string }>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'SCAN_TICKET' }, resolve)
+      const response = await new Promise<{ success: boolean; customerMessage?: string; ticketSubject?: string; error?: string } | null>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'SCAN_TICKET' }, (res) => {
+          resolve(res || null)
+        })
       })
+
+      if (!response) {
+        throw new Error('Could not connect to the page. Please refresh the Freshdesk page and try again.')
+      }
 
       if (!response.success) {
         throw new Error(response.error || 'Failed to scan ticket')
@@ -273,19 +279,44 @@ export default function Popup() {
         finalReply = generatedReply + '\n\n' + settings.signature
       }
 
-      const response = await new Promise<{ success: boolean; error?: string }>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'INSERT_REPLY', payload: finalReply }, resolve)
+      const response = await new Promise<{ success: boolean; error?: string } | null>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'INSERT_REPLY', payload: finalReply }, (res) => {
+          resolve(res || null)
+        })
       })
 
+      if (!response) {
+        // If no response, copy to clipboard as fallback
+        await navigator.clipboard.writeText(finalReply)
+        setSuccess('Could not insert directly. Reply copied to clipboard - paste it manually!')
+        setTimeout(() => setSuccess(null), 5000)
+        return
+      }
+
       if (!response.success) {
-        throw new Error(response.error || 'Failed to insert reply')
+        // Try copying to clipboard as fallback
+        await navigator.clipboard.writeText(finalReply)
+        setSuccess('Could not insert directly. Reply copied to clipboard - paste it manually!')
+        setTimeout(() => setSuccess(null), 5000)
+        return
       }
 
       setSuccess('Reply inserted into Freshdesk!')
       clearState() // Clear saved state after successful insert
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to insert reply')
+      // Final fallback: try to copy to clipboard
+      try {
+        let finalReply = generatedReply
+        if (settings.signature && settings.signature.trim()) {
+          finalReply = generatedReply + '\n\n' + settings.signature
+        }
+        await navigator.clipboard.writeText(finalReply)
+        setSuccess('Reply copied to clipboard - paste it manually!')
+        setTimeout(() => setSuccess(null), 5000)
+      } catch {
+        setError('Failed to insert reply. Please copy it manually.')
+      }
     } finally {
       setInserting(false)
     }

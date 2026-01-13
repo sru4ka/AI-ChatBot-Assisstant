@@ -88,6 +88,10 @@ function handleInsertReply(reply: string, sendResponse: (response: unknown) => v
   })
 }
 
+// Current settings for the floating button
+let currentTone: 'professional' | 'friendly' | 'concise' = 'professional'
+let currentCustomPrompt = ''
+
 // Create the floating "Reply with AI" button
 function createReplyWithAIButton() {
   // Remove existing container if any
@@ -98,10 +102,32 @@ function createReplyWithAIButton() {
   floatingContainer = document.createElement('div')
   floatingContainer.id = 'freshdesk-ai-reply-container'
   floatingContainer.innerHTML = `
-    <button id="freshdesk-ai-reply-btn" class="freshdesk-ai-floating-btn">
-      <span class="btn-icon">✨</span>
-      <span class="btn-text">Reply with AI</span>
-    </button>
+    <div class="freshdesk-ai-btn-group">
+      <button id="freshdesk-ai-reply-btn" class="freshdesk-ai-floating-btn freshdesk-ai-main-btn">
+        <span class="btn-icon">✨</span>
+        <span class="btn-text">Reply with AI</span>
+      </button>
+      <button id="freshdesk-ai-dropdown-btn" class="freshdesk-ai-dropdown-toggle">
+        <span>▼</span>
+      </button>
+    </div>
+    <div id="freshdesk-ai-dropdown" class="freshdesk-ai-dropdown hidden">
+      <div class="dropdown-section">
+        <label>Response Tone</label>
+        <div class="dropdown-tone-btns">
+          <button class="dropdown-tone-btn active" data-tone="professional">Professional</button>
+          <button class="dropdown-tone-btn" data-tone="friendly">Friendly</button>
+          <button class="dropdown-tone-btn" data-tone="concise">Concise</button>
+        </div>
+      </div>
+      <div class="dropdown-section">
+        <label>Custom Instructions</label>
+        <textarea id="freshdesk-ai-custom-prompt" placeholder="Add extra instructions for the AI..."></textarea>
+      </div>
+      <div class="dropdown-footer">
+        <button id="freshdesk-ai-save-settings" class="dropdown-save-btn">Save & Close</button>
+      </div>
+    </div>
     <div id="freshdesk-ai-panel" class="freshdesk-ai-panel hidden">
       <div class="panel-header">
         <span>AI Generated Reply</span>
@@ -119,17 +145,104 @@ function createReplyWithAIButton() {
 
   document.body.appendChild(floatingContainer)
 
+  // Load saved settings
+  loadButtonSettings()
+
   // Add event listeners
   const replyBtn = document.getElementById('freshdesk-ai-reply-btn')
+  const dropdownBtn = document.getElementById('freshdesk-ai-dropdown-btn')
+  const dropdown = document.getElementById('freshdesk-ai-dropdown')
   const closeBtn = document.getElementById('freshdesk-ai-close')
   const copyBtn = document.getElementById('freshdesk-ai-copy')
   const insertBtn = document.getElementById('freshdesk-ai-insert')
   const panel = document.getElementById('freshdesk-ai-panel')
+  const saveSettingsBtn = document.getElementById('freshdesk-ai-save-settings')
+  const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
 
   replyBtn?.addEventListener('click', handleGenerateReply)
   closeBtn?.addEventListener('click', () => panel?.classList.add('hidden'))
   copyBtn?.addEventListener('click', handleCopyReply)
   insertBtn?.addEventListener('click', handleInsertGeneratedReply)
+
+  // Dropdown toggle
+  dropdownBtn?.addEventListener('click', (e) => {
+    e.stopPropagation()
+    dropdown?.classList.toggle('hidden')
+    panel?.classList.add('hidden')
+  })
+
+  // Tone buttons
+  const toneBtns = floatingContainer.querySelectorAll('.dropdown-tone-btn')
+  toneBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      toneBtns.forEach(b => b.classList.remove('active'))
+      btn.classList.add('active')
+      currentTone = (btn as HTMLElement).dataset.tone as typeof currentTone
+    })
+  })
+
+  // Save settings button
+  saveSettingsBtn?.addEventListener('click', () => {
+    currentCustomPrompt = customPromptInput?.value || ''
+    saveButtonSettings()
+    dropdown?.classList.add('hidden')
+    showToast('Settings saved!', 'success')
+  })
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!floatingContainer?.contains(e.target as Node)) {
+      dropdown?.classList.add('hidden')
+    }
+  })
+}
+
+async function loadButtonSettings() {
+  try {
+    const result = await chrome.storage.local.get(['freshdeskAiSettings', 'defaultTone', 'customPrompt'])
+
+    // Load from popup settings if available
+    if (result.freshdeskAiSettings) {
+      currentTone = result.freshdeskAiSettings.defaultTone || 'professional'
+      currentCustomPrompt = result.freshdeskAiSettings.customPrompt || ''
+    } else {
+      currentTone = result.defaultTone || 'professional'
+      currentCustomPrompt = result.customPrompt || ''
+    }
+
+    // Update UI
+    const toneBtns = document.querySelectorAll('.dropdown-tone-btn')
+    toneBtns.forEach(btn => {
+      btn.classList.toggle('active', (btn as HTMLElement).dataset.tone === currentTone)
+    })
+
+    const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
+    if (customPromptInput) {
+      customPromptInput.value = currentCustomPrompt
+    }
+  } catch (err) {
+    console.error('Failed to load settings:', err)
+  }
+}
+
+async function saveButtonSettings() {
+  try {
+    // Get existing settings and merge
+    const result = await chrome.storage.local.get(['freshdeskAiSettings'])
+    const existingSettings = result.freshdeskAiSettings || {}
+
+    await chrome.storage.local.set({
+      freshdeskAiSettings: {
+        ...existingSettings,
+        defaultTone: currentTone,
+        customPrompt: currentCustomPrompt,
+      },
+      defaultTone: currentTone,
+      customPrompt: currentCustomPrompt,
+    })
+  } catch (err) {
+    console.error('Failed to save settings:', err)
+  }
 }
 
 // Store the generated reply
@@ -162,11 +275,11 @@ async function handleGenerateReply() {
       throw new Error('Could not find customer message')
     }
 
-    // Get settings from storage
-    const settings = await chrome.storage.local.get(['defaultTone', 'customPrompt', 'signature'])
-    const tone = settings.defaultTone || 'professional'
-    const customPrompt = settings.customPrompt || ''
-    const signature = settings.signature || ''
+    // Get settings - use currentTone and currentCustomPrompt from dropdown, signature from storage
+    const settings = await chrome.storage.local.get(['freshdeskAiSettings'])
+    const signature = settings.freshdeskAiSettings?.signature || ''
+    const tone = currentTone
+    const customPrompt = currentCustomPrompt
 
     // Get auth session
     const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
