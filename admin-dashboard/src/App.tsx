@@ -7,6 +7,7 @@ import TestArea from './components/TestArea'
 import DocumentUpload from './components/DocumentUpload'
 import LearnFromTickets from './components/LearnFromTickets'
 import WebsiteOverview from './components/WebsiteOverview'
+import ShopifyOverview from './components/ShopifyOverview'
 
 type Page = 'dashboard' | 'upload' | 'settings'
 
@@ -197,10 +198,19 @@ function App() {
                   <p>Test AI responses and manage your knowledge base</p>
                 </div>
 
-                {/* Website Quick Overview */}
-                <div style={{ marginBottom: '1.5rem' }}>
+                {/* Connection Status Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+                  {/* Website Quick Overview */}
                   <WebsiteOverview
                     websiteUrl={(business as any).website_url}
+                    onConfigureClick={() => setCurrentPage('settings')}
+                  />
+
+                  {/* Shopify Connection & Order Lookup */}
+                  <ShopifyOverview
+                    shopifyDomain={(business as any).shopify_domain}
+                    shopifyAccessToken={(business as any).shopify_access_token}
+                    businessId={business.id}
                     onConfigureClick={() => setCurrentPage('settings')}
                   />
                 </div>
