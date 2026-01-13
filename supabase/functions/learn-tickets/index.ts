@@ -32,105 +32,197 @@ interface FreshdeskConversation {
 /**
  * Fetch RESOLVED and CLOSED tickets from Freshdesk API
  * Status 4 = Resolved, Status 5 = Closed
+ * Uses the filter API for better results
  */
 async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
   const perPage = 100
   const tickets: FreshdeskTicket[] = []
+  const seenIds = new Set<number>()
 
   console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
-  // Method 1: Use search API to find resolved and closed tickets
-  for (const status of [5, 4]) { // Prioritize closed (5) since resolved (4) become closed
-    if (tickets.length >= count) break
+  // Method 1: Use Freshdesk's predefined filters for resolved and closed tickets
+  // Filter IDs: We'll try different approaches
 
-    let page = 1
-    const maxPages = Math.ceil(count / 30) // Search API returns 30 per page
+  // First, let's get tickets directly with status filter using the tickets API
+  // The tickets API with include=description gives us what we need
 
-    while (page <= maxPages && tickets.length < count) {
-      try {
-        const response = await fetch(
-          `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
-          {
-            headers: {
-              'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-              'Content-Type': 'application/json',
-            },
-          }
-        )
+  // Try using the "all tickets" endpoint with filtering
+  const maxPagesPerStatus = Math.ceil(count / perPage) + 5 // Extra pages to ensure we get enough
 
-        if (!response.ok) {
-          console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
-          break
+  // Fetch closed tickets (status 5) - these are the most valuable
+  console.log('Fetching closed tickets (status 5)...')
+  for (let page = 1; page <= maxPagesPerStatus && tickets.length < count; page++) {
+    try {
+      // Use filter parameter for closed tickets
+      const response = await fetch(
+        `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
+        {
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+            'Content-Type': 'application/json',
+          },
         }
+      )
 
-        const data = await response.json()
-        if (!data.results || data.results.length === 0) {
-          console.log(`No more results for status ${status} at page ${page}`)
-          break
+      if (!response.ok) {
+        const status = response.status
+        console.log(`Tickets API returned ${status} at page ${page}`)
+        if (status === 429) {
+          // Rate limited, wait and retry
+          console.log('Rate limited, waiting 30 seconds...')
+          await new Promise(resolve => setTimeout(resolve, 30000))
+          page-- // Retry this page
+          continue
         }
-
-        console.log(`Found ${data.results.length} tickets with status ${status} on page ${page}`)
-        tickets.push(...data.results)
-        page++
-
-        // Freshdesk rate limit: 50 requests per minute for search
-        await new Promise(resolve => setTimeout(resolve, 150))
-
-      } catch (err) {
-        console.error(`Error searching status ${status}:`, err)
         break
       }
+
+      const data = await response.json()
+      if (!data || data.length === 0) {
+        console.log(`No more tickets at page ${page}`)
+        break
+      }
+
+      // Filter for closed (5) and resolved (4) tickets
+      for (const ticket of data) {
+        if ((ticket.status === 5 || ticket.status === 4) && !seenIds.has(ticket.id)) {
+          seenIds.add(ticket.id)
+          tickets.push(ticket)
+        }
+      }
+
+      console.log(`Page ${page}: found ${data.length} tickets, ${tickets.length} total resolved/closed`)
+
+      // Rate limit - be more conservative
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+    } catch (err) {
+      console.error(`Error fetching page ${page}:`, err)
+      break
     }
   }
 
-  console.log(`Search API found ${tickets.length} tickets total`)
+  console.log(`Standard API found ${tickets.length} resolved/closed tickets`)
 
-  // Method 2: If search didn't find enough, use standard tickets API with filter
+  // Method 2: If we still need more, use the search API with different queries
   if (tickets.length < count) {
-    console.log('Supplementing with standard tickets API...')
-    const existingIds = new Set(tickets.map(t => t.id))
+    console.log('Supplementing with search API...')
 
-    for (let page = 1; page <= 20 && tickets.length < count; page++) {
-      try {
-        const response = await fetch(
-          `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
-          {
-            headers: {
-              'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-              'Content-Type': 'application/json',
-            },
+    for (const status of [5, 4]) {
+      if (tickets.length >= count) break
+
+      let page = 1
+      const maxSearchPages = 10 // Search API limit is ~300 results (10 pages x 30)
+
+      while (page <= maxSearchPages && tickets.length < count) {
+        try {
+          const response = await fetch(
+            `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+            {
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+                'Content-Type': 'application/json',
+              },
+            }
+          )
+
+          if (!response.ok) {
+            console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
+            break
           }
-        )
 
-        if (!response.ok) {
-          console.log(`Tickets API returned ${response.status} at page ${page}`)
+          const data = await response.json()
+          if (!data.results || data.results.length === 0) {
+            break
+          }
+
+          for (const ticket of data.results) {
+            if (!seenIds.has(ticket.id)) {
+              seenIds.add(ticket.id)
+              tickets.push(ticket)
+            }
+          }
+
+          console.log(`Search page ${page} (status ${status}): ${data.results.length} results, ${tickets.length} total`)
+          page++
+
+          // Rate limit for search API
+          await new Promise(resolve => setTimeout(resolve, 300))
+
+        } catch (err) {
+          console.error(`Error searching status ${status}:`, err)
           break
         }
-
-        const data = await response.json()
-        if (!data || data.length === 0) break
-
-        // Filter for resolved (4) or closed (5) tickets we don't already have
-        const newTickets = data.filter((t: FreshdeskTicket) =>
-          t.status >= 4 && !existingIds.has(t.id)
-        )
-
-        newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
-        tickets.push(...newTickets)
-
-        console.log(`Page ${page}: found ${newTickets.length} new resolved/closed tickets`)
-
-        // Rate limit
-        await new Promise(resolve => setTimeout(resolve, 100))
-
-      } catch (err) {
-        console.error(`Error fetching page ${page}:`, err)
-        break
       }
     }
   }
 
-  console.log(`Total tickets found: ${tickets.length}`)
+  // Method 3: Try using filter views if available
+  if (tickets.length < count) {
+    console.log('Trying filter views...')
+    try {
+      // Get all available filters
+      const filtersResponse = await fetch(
+        `https://${domain}/api/v2/ticket_filters`,
+        {
+          headers: {
+            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+            'Content-Type': 'application/json',
+          },
+        }
+      )
+
+      if (filtersResponse.ok) {
+        const filters = await filtersResponse.json()
+        console.log(`Found ${filters.length} ticket filters`)
+
+        // Look for "Resolved" or "Closed" filters
+        for (const filter of filters) {
+          if (tickets.length >= count) break
+
+          const filterName = (filter.name || '').toLowerCase()
+          if (filterName.includes('resolved') || filterName.includes('closed') || filterName.includes('all')) {
+            console.log(`Trying filter: ${filter.name} (ID: ${filter.id})`)
+
+            for (let page = 1; page <= 10 && tickets.length < count; page++) {
+              try {
+                const response = await fetch(
+                  `https://${domain}/api/v2/tickets?filter_id=${filter.id}&per_page=${perPage}&page=${page}&include=description`,
+                  {
+                    headers: {
+                      'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+                      'Content-Type': 'application/json',
+                    },
+                  }
+                )
+
+                if (!response.ok) break
+
+                const data = await response.json()
+                if (!data || data.length === 0) break
+
+                for (const ticket of data) {
+                  if ((ticket.status === 5 || ticket.status === 4) && !seenIds.has(ticket.id)) {
+                    seenIds.add(ticket.id)
+                    tickets.push(ticket)
+                  }
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 200))
+              } catch {
+                break
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching filters:', err)
+    }
+  }
+
+  console.log(`Total unique resolved/closed tickets found: ${tickets.length}`)
   return tickets.slice(0, count)
 }
 
@@ -281,7 +373,7 @@ Deno.serve(async (req: Request) => {
 
         // Rate limiting - Freshdesk API limits
         if (processedCount % 10 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 200))
+          await new Promise(resolve => setTimeout(resolve, 300))
         }
       } catch (err) {
         console.warn(`Error processing ticket ${ticket.id}:`, err)
@@ -295,6 +387,8 @@ Deno.serve(async (req: Request) => {
           message: 'No resolved tickets with conversations found',
           ticketsScanned: processedCount,
           documentsCreated: 0,
+          conversationsLearned: 0,
+          chunksCreated: 0,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
