@@ -2,13 +2,26 @@ import { useState, useEffect } from 'react'
 import { signIn, signUp, signOut, getCurrentUser, generateReply, GenerateReplyResponse } from '../utils/api'
 import { User } from '@supabase/supabase-js'
 
-type Tab = 'main' | 'account'
+type Tab = 'main' | 'account' | 'settings'
 type AuthMode = 'login' | 'signup'
 type Tone = 'professional' | 'friendly' | 'concise'
+
+// Admin Dashboard URL - Update this to your deployed dashboard URL
+const ADMIN_DASHBOARD_URL = 'https://freshdesk-ai-admin.vercel.app'
 
 interface TicketInfo {
   customerMessage: string
   ticketSubject?: string
+}
+
+interface StoredSettings {
+  defaultTone: Tone
+  autoScan: boolean
+}
+
+const DEFAULT_SETTINGS: StoredSettings = {
+  defaultTone: 'professional',
+  autoScan: false,
 }
 
 export default function Popup() {
@@ -36,9 +49,38 @@ export default function Popup() {
   const [businessName, setBusinessName] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
 
+  // Settings state
+  const [settings, setSettings] = useState<StoredSettings>(DEFAULT_SETTINGS)
+  const [settingsSaved, setSettingsSaved] = useState(false)
+
   useEffect(() => {
     init()
+    loadSettings()
   }, [])
+
+  async function loadSettings() {
+    try {
+      const result = await chrome.storage.local.get(['freshdeskAiSettings'])
+      if (result.freshdeskAiSettings) {
+        const saved = result.freshdeskAiSettings as StoredSettings
+        setSettings(saved)
+        setTone(saved.defaultTone)
+      }
+    } catch (err) {
+      console.error('Failed to load settings:', err)
+    }
+  }
+
+  async function saveSettings(newSettings: StoredSettings) {
+    try {
+      await chrome.storage.local.set({ freshdeskAiSettings: newSettings })
+      setSettings(newSettings)
+      setSettingsSaved(true)
+      setTimeout(() => setSettingsSaved(false), 2000)
+    } catch (err) {
+      console.error('Failed to save settings:', err)
+    }
+  }
 
   async function init() {
     setLoading(true)
@@ -186,6 +228,10 @@ export default function Popup() {
     }
   }
 
+  function openAdminDashboard() {
+    window.open(ADMIN_DASHBOARD_URL, '_blank')
+  }
+
   if (loading) {
     return (
       <div className="popup">
@@ -209,6 +255,9 @@ export default function Popup() {
       <div className="tabs">
         <button className={`tab ${activeTab === 'main' ? 'active' : ''}`} onClick={() => setActiveTab('main')}>
           Generate Reply
+        </button>
+        <button className={`tab ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+          Settings
         </button>
         <button className={`tab ${activeTab === 'account' ? 'active' : ''}`} onClick={() => setActiveTab('account')}>
           Account
@@ -320,6 +369,92 @@ export default function Popup() {
               </>
             )}
           </>
+        ) : activeTab === 'settings' ? (
+          /* Settings Tab */
+          <div className="settings-form">
+            <div className="setting-group">
+              <label>Default Response Tone</label>
+              <div className="tone-selector" style={{ marginTop: 8 }}>
+                {(['professional', 'friendly', 'concise'] as Tone[]).map((t) => (
+                  <button
+                    key={t}
+                    className={`tone-btn ${settings.defaultTone === t ? 'active' : ''}`}
+                    onClick={() => {
+                      const newSettings = { ...settings, defaultTone: t }
+                      saveSettings(newSettings)
+                      setTone(t)
+                    }}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="setting-group" style={{ marginTop: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={settings.autoScan}
+                  onChange={(e) => {
+                    const newSettings = { ...settings, autoScan: e.target.checked }
+                    saveSettings(newSettings)
+                  }}
+                  style={{ width: 18, height: 18 }}
+                />
+                Auto-scan ticket when opening popup
+              </label>
+            </div>
+
+            {settingsSaved && (
+              <div className="status success" style={{ marginTop: 12 }}>
+                Settings saved!
+              </div>
+            )}
+
+            {/* Admin Dashboard Link */}
+            <div className="admin-section" style={{ marginTop: 24, padding: 16, background: '#f5f5f5', borderRadius: 8 }}>
+              <h3 style={{ marginBottom: 8, fontSize: 14 }}>Admin Dashboard</h3>
+              <p style={{ fontSize: 12, color: '#666', marginBottom: 12 }}>
+                Upload documents, configure integrations, and manage your knowledge base.
+              </p>
+              <button
+                className="btn btn-secondary"
+                onClick={openAdminDashboard}
+                style={{ width: '100%' }}
+              >
+                Open Admin Dashboard
+              </button>
+            </div>
+
+            {/* Quick Links */}
+            <div className="quick-links" style={{ marginTop: 16 }}>
+              <h4 style={{ fontSize: 12, color: '#666', marginBottom: 8 }}>Quick Links</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <a
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); openAdminDashboard() }}
+                  style={{ fontSize: 13, color: '#667eea' }}
+                >
+                  📚 Manage Knowledge Base
+                </a>
+                <a
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); openAdminDashboard() }}
+                  style={{ fontSize: 13, color: '#667eea' }}
+                >
+                  🧠 Learn from Past Tickets
+                </a>
+                <a
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); openAdminDashboard() }}
+                  style={{ fontSize: 13, color: '#667eea' }}
+                >
+                  ⚙️ Configure Integrations
+                </a>
+              </div>
+            </div>
+          </div>
         ) : (
           /* Account Tab */
           <div className="settings-form">
@@ -338,6 +473,20 @@ export default function Popup() {
                 >
                   Log Out
                 </button>
+
+                {/* Admin Dashboard Link */}
+                <div style={{ marginTop: 20, padding: 16, background: '#eff6ff', borderRadius: 8, border: '1px solid #bfdbfe' }}>
+                  <p style={{ fontSize: 13, marginBottom: 12, color: '#1a56db' }}>
+                    <strong>Manage your AI assistant</strong>
+                  </p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={openAdminDashboard}
+                    style={{ width: '100%' }}
+                  >
+                    Open Admin Dashboard
+                  </button>
+                </div>
 
                 <div className="status info" style={{ marginTop: 16 }}>
                   Upload documents via the Admin Dashboard to improve AI responses.
@@ -412,7 +561,11 @@ export default function Popup() {
       </div>
 
       <footer className="footer">
-        <a href="#" onClick={(e) => { e.preventDefault(); window.open('https://github.com') }}>
+        <a href="#" onClick={(e) => { e.preventDefault(); openAdminDashboard() }}>
+          Open Admin Dashboard
+        </a>
+        <span style={{ margin: '0 8px', color: '#ccc' }}>|</span>
+        <a href="#" onClick={(e) => { e.preventDefault(); window.open('https://github.com/anthropics/claude-code/issues') }}>
           Need help?
         </a>
       </footer>

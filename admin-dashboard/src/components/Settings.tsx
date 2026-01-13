@@ -123,12 +123,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
-  // Ticket learning state
-  const [learningTickets, setLearningTickets] = useState(false)
-  const [ticketCount, setTicketCount] = useState(100)
-  const [learnError, setLearnError] = useState<string | null>(null)
-  const [learnSuccess, setLearnSuccess] = useState<string | null>(null)
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -164,44 +158,8 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
     }
   }
 
-  async function handleLearnFromTickets() {
-    if (!freshdeskDomain || !freshdeskApiKey) {
-      setLearnError('Please configure Freshdesk credentials first')
-      return
-    }
-
-    setLearningTickets(true)
-    setLearnError(null)
-    setLearnSuccess(null)
-
-    try {
-      const response = await supabase.functions.invoke('learn-tickets', {
-        body: {
-          businessId: business.id,
-          freshdeskDomain: freshdeskDomain.replace(/^https?:\/\//, ''),
-          freshdeskApiKey,
-          ticketCount,
-        },
-      })
-
-      if (response.error) {
-        throw new Error(response.error.message)
-      }
-
-      const data = response.data
-      setLearnSuccess(
-        `Successfully learned from ${data.conversationsLearned} resolved tickets! ` +
-        `(${data.chunksCreated} knowledge chunks created)`
-      )
-    } catch (err) {
-      setLearnError(err instanceof Error ? err.message : 'Failed to learn from tickets')
-    } finally {
-      setLearningTickets(false)
-    }
-  }
-
   return (
-    <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+    <div className="settings-form">
       {/* Toast notification */}
       {toast && (
         <Toast
@@ -387,66 +345,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           Save Settings
         </button>
       </form>
-
-      {/* Ticket Learning Section */}
-      <CollapsibleSection
-        title="Learn from Past Tickets"
-        subtitle="Train AI on your resolved tickets"
-        icon="🧠"
-        color="#c2410c"
-        bgColor="#fff7ed"
-        borderColor="#fed7aa"
-        defaultOpen={true}
-      >
-        <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '1rem' }}>
-          Scan your resolved Freshdesk tickets to teach the AI your response patterns.
-        </p>
-
-        {learnError && <div className="error-message" style={{ marginBottom: '1rem' }}>{learnError}</div>}
-        {learnSuccess && <div className="success-message" style={{ marginBottom: '1rem' }}>{learnSuccess}</div>}
-
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-          <div style={{ flex: 1 }}>
-            <label htmlFor="ticketCount" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-              Tickets to scan
-            </label>
-            <select
-              id="ticketCount"
-              value={ticketCount}
-              onChange={(e) => setTicketCount(Number(e.target.value))}
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
-            >
-              <option value={100}>100 tickets</option>
-              <option value={250}>250 tickets</option>
-              <option value={500}>500 tickets</option>
-              <option value={1000}>1000 tickets</option>
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={handleLearnFromTickets}
-            disabled={learningTickets || !freshdeskDomain || !freshdeskApiKey}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: '#c2410c',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              opacity: (learningTickets || !freshdeskDomain || !freshdeskApiKey) ? 0.6 : 1,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {learningTickets ? 'Learning...' : 'Learn'}
-          </button>
-        </div>
-
-        {(!freshdeskDomain || !freshdeskApiKey) && (
-          <p style={{ fontSize: '0.8rem', color: '#c2410c', marginTop: '0.75rem' }}>
-            Configure Freshdesk above first
-          </p>
-        )}
-      </CollapsibleSection>
 
       {/* Business ID - Compact */}
       <div style={{
