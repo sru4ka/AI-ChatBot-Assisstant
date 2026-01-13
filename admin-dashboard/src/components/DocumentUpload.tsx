@@ -1,15 +1,33 @@
 import { useState, useRef } from 'react'
 import { ingestDocument } from '../lib/supabase'
+import * as pdfjsLib from 'pdfjs-dist'
+import mammoth from 'mammoth'
+
+// Set up PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
 interface DocumentUploadProps {
   businessId: string
   onUploaded: () => void
 }
 
+type FileType = 'txt' | 'md' | 'json' | 'pdf' | 'docx' | 'unknown'
+
+function getFileType(file: File): FileType {
+  const ext = file.name.split('.').pop()?.toLowerCase() || ''
+  if (ext === 'txt') return 'txt'
+  if (ext === 'md') return 'md'
+  if (ext === 'json') return 'json'
+  if (ext === 'pdf') return 'pdf'
+  if (ext === 'docx' || ext === 'doc') return 'docx'
+  return 'unknown'
+}
+
 export default function DocumentUpload({ businessId, onUploaded }: DocumentUploadProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -17,10 +35,38 @@ export default function DocumentUpload({ businessId, onUploaded }: DocumentUploa
     setLoading(true)
     setError(null)
     setSuccess(null)
+    setProgress(null)
 
     try {
-      // Read file content
-      const content = await readFileContent(file)
+      const fileType = getFileType(file)
+      setProgress(`Reading ${file.name}...`)
+
+      let content: string
+
+      switch (fileType) {
+        case 'pdf':
+          setProgress('Extracting text from PDF...')
+          content = await extractPdfText(file)
+          break
+        case 'docx':
+          setProgress('Extracting text from Word document...')
+          content = await extractWordText(file)
+          break
+        case 'txt':
+        case 'md':
+        case 'json':
+          content = await readTextFile(file)
+          break
+        default:
+          // Try reading as text
+          content = await readTextFile(file)
+      }
+
+      if (!content.trim()) {
+        throw new Error('Document appears to be empty or could not be read')
+      }
+
+      setProgress(`Uploading ${file.name} to knowledge base...`)
 
       // Ingest the document
       const result = await ingestDocument(businessId, content, file.name)
@@ -33,36 +79,44 @@ export default function DocumentUpload({ businessId, onUploaded }: DocumentUploa
         fileInputRef.current.value = ''
       }
     } catch (err) {
+      console.error('Upload error:', err)
       setError(err instanceof Error ? err.message : 'Failed to upload document')
     } finally {
       setLoading(false)
+      setProgress(null)
     }
   }
 
-  async function readFileContent(file: File): Promise<string> {
+  async function readTextFile(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
-
-      reader.onload = (e) => {
-        const content = e.target?.result as string
-        resolve(content)
-      }
-
-      reader.onerror = () => {
-        reject(new Error('Failed to read file'))
-      }
-
-      // For now, we only support text files
-      // PDF and DOCX would need additional libraries
-      if (file.type === 'text/plain' || file.name.endsWith('.txt') || file.name.endsWith('.md')) {
-        reader.readAsText(file)
-      } else if (file.type === 'application/json' || file.name.endsWith('.json')) {
-        reader.readAsText(file)
-      } else {
-        // Try to read as text anyway
-        reader.readAsText(file)
-      }
+      reader.onload = (e) => resolve(e.target?.result as string)
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsText(file)
     })
+  }
+
+  async function extractPdfText(file: File): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    const textParts: string[] = []
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const textContent = await page.getTextContent()
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ')
+      textParts.push(pageText)
+    }
+
+    return textParts.join('\n\n')
+  }
+
+  async function extractWordText(file: File): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer()
+    const result = await mammoth.extractRawText({ arrayBuffer })
+    return result.value
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
@@ -110,20 +164,20 @@ export default function DocumentUpload({ businessId, onUploaded }: DocumentUploa
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.md,.json"
+          accept=".txt,.md,.json,.pdf,.docx,.doc"
           onChange={handleFileSelect}
           disabled={loading}
         />
         {loading ? (
           <div>
             <span className="spinner" style={{ borderColor: '#667eea', borderTopColor: 'transparent' }} />
-            <p>Processing document...</p>
+            <p>{progress || 'Processing document...'}</p>
           </div>
         ) : (
           <>
             <p>Drag and drop a file here, or click to select</p>
             <p style={{ fontSize: '0.85rem', color: '#999' }}>
-              Supported formats: .txt, .md, .json
+              Supported formats: PDF, Word (.docx), Text (.txt), Markdown (.md), JSON
             </p>
           </>
         )}

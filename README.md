@@ -4,111 +4,42 @@ AI-powered Chrome extension that helps customer support agents generate intellig
 
 ## Features
 
-- **Knowledge Base Integration**: Upload your FAQs, policies, and product documentation
+- **Knowledge Base Integration**: Upload your FAQs, policies, and product documentation (PDF, Word, TXT, MD)
 - **AI-Powered Replies**: Generate contextual responses based on your knowledge base
 - **Freshdesk Integration**: Seamlessly scan tickets and insert replies directly into Freshdesk
+- **Learn from Past Tickets**: Scan 100-1000 resolved tickets to teach AI your response patterns
+- **Shopify Integration**: Automatically include order information in AI replies
 - **Tone Control**: Choose between professional, friendly, or concise response styles
 - **Source Transparency**: See which documents were used to generate each reply
 
-## Architecture
+## Quick Start (Production)
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Chrome         │     │  Supabase       │     │  OpenAI         │
-│  Extension      │────▶│  Edge Functions │────▶│  API            │
-│  (Freshdesk)    │     │  + PostgreSQL   │     │  (Embeddings +  │
-└─────────────────┘     │  + pgvector     │     │   GPT-4o-mini)  │
-                        └─────────────────┘     └─────────────────┘
-        │
-        ▼
-┌─────────────────┐
-│  Admin          │
-│  Dashboard      │
-│  (React + Vite) │
-└─────────────────┘
-```
+### Step 1: Set Up Supabase
 
-## Tech Stack
+1. Go to [supabase.com](https://supabase.com) and create a new project
+2. Note your **Project Reference ID** from Project Settings → General
+3. Note your **Project URL** and **anon key** from Project Settings → API
 
-| Component | Technology |
-|-----------|------------|
-| Database & Auth | Supabase (PostgreSQL + pgvector) |
-| Backend API | Supabase Edge Functions (Deno) |
-| Embeddings | OpenAI `text-embedding-3-small` |
-| LLM | OpenAI `gpt-4o-mini` |
-| Admin Dashboard | React + TypeScript + Vite |
-| Chrome Extension | Manifest V3 + React + TypeScript |
+### Step 2: Run Database Setup SQL
 
-## Project Structure
-
-```
-AI-ChatBot-Assistant/
-├── supabase/
-│   ├── config.toml              # Supabase configuration
-│   └── functions/
-│       ├── generate-reply/      # AI reply generation endpoint
-│       └── ingest-document/     # Document processing endpoint
-├── admin-dashboard/             # React web app for business onboarding
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Login.tsx
-│   │   │   ├── Dashboard.tsx
-│   │   │   ├── DocumentUpload.tsx
-│   │   │   ├── Settings.tsx
-│   │   │   └── TestArea.tsx
-│   │   └── lib/
-│   │       └── supabase.ts
-│   └── package.json
-└── extension/                   # Chrome extension
-    ├── manifest.json
-    ├── src/
-    │   ├── background.ts
-    │   ├── content.ts
-    │   ├── popup/
-    │   │   └── Popup.tsx
-    │   └── utils/
-    │       ├── api.ts
-    │       └── freshdesk.ts
-    └── package.json
-```
-
-## Prerequisites
-
-- Node.js 18+
-- Supabase CLI
-- A Supabase project with pgvector enabled
-- An OpenAI API key
-- A Freshdesk account (for testing)
-
-## Setup Instructions
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/your-username/AI-ChatBot-Assistant.git
-cd AI-ChatBot-Assistant
-```
-
-### 2. Set Up Supabase
-
-#### Create Database Tables
-
-Run the following SQL in your Supabase SQL Editor:
+Go to your Supabase Dashboard → SQL Editor and run this SQL:
 
 ```sql
 -- Enable pgvector extension
 create extension if not exists vector;
 
--- Businesses/accounts
+-- Businesses/accounts table
 create table businesses (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   freshdesk_domain text,
   freshdesk_api_key text,
+  shopify_domain text,
+  shopify_access_token text,
   created_at timestamp default now()
 );
 
--- Uploaded documents
+-- Uploaded documents table
 create table documents (
   id uuid primary key default gen_random_uuid(),
   business_id uuid references businesses(id) on delete cascade,
@@ -154,7 +85,7 @@ alter table businesses enable row level security;
 alter table documents enable row level security;
 alter table chunks enable row level security;
 
--- RLS Policies (adjust as needed for your auth setup)
+-- RLS Policies
 create policy "Users can view their own business" on businesses
   for select using (auth.uid() = id);
 
@@ -180,24 +111,39 @@ create policy "Users can delete their documents" on documents
   );
 ```
 
-#### Deploy Edge Functions
+### Step 3: Deploy Edge Functions
+
+**Option A: Deploy from Command Line (Recommended)**
 
 ```bash
+# Clone the repository
+git clone https://github.com/sru4ka/AI-ChatBot-Assisstant.git
+cd AI-ChatBot-Assisstant
+
+# Install dependencies
+npm install
+
 # Login to Supabase
 npx supabase login
 
-# Link your project
-npx supabase link --project-ref your-project-ref
+# Link your project (replace with your project ref)
+npx supabase link --project-ref YOUR_PROJECT_REF
 
-# Set secrets for Edge Functions
+# Set the OpenAI API key secret
 npx supabase secrets set OPENAI_API_KEY=your-openai-api-key
 
-# Deploy functions
-npx supabase functions deploy generate-reply
-npx supabase functions deploy ingest-document
+# Deploy all functions (no Docker required with --legacy-bundle)
+npx supabase functions deploy generate-reply --legacy-bundle --no-verify-jwt
+npx supabase functions deploy ingest-document --legacy-bundle --no-verify-jwt
+npx supabase functions deploy learn-tickets --legacy-bundle --no-verify-jwt
+npx supabase functions deploy shopify-orders --legacy-bundle --no-verify-jwt
 ```
 
-### 3. Set Up Admin Dashboard
+**Option B: If deployment fails**, deploy directly in Supabase Dashboard:
+1. Go to Edge Functions in your Supabase Dashboard
+2. Create each function manually and paste the code from `supabase/functions/`
+
+### Step 4: Set Up Admin Dashboard
 
 ```bash
 cd admin-dashboard
@@ -208,15 +154,17 @@ npm install
 # Create environment file
 cp .env.example .env
 
-# Edit .env with your Supabase credentials
-# VITE_SUPABASE_URL=https://your-project.supabase.co
+# Edit .env with your Supabase credentials:
+# VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 # VITE_SUPABASE_ANON_KEY=your-anon-key
 
-# Start development server
+# Start the dashboard
 npm run dev
 ```
 
-### 4. Build Chrome Extension
+Open http://localhost:5173 in your browser.
+
+### Step 5: Build Chrome Extension
 
 ```bash
 cd extension
@@ -226,117 +174,156 @@ npm install
 
 # Build extension
 npm run build
-
-# The built extension will be in extension/dist/
 ```
 
-#### Load Extension in Chrome
-
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top right)
+Load in Chrome:
+1. Go to `chrome://extensions/`
+2. Enable "Developer mode" (top right)
 3. Click "Load unpacked"
 4. Select the `extension/dist` folder
 
-### 5. Configure the Extension
+---
 
-1. Click the extension icon in Chrome
-2. Go to "Settings" tab
-3. Enter your:
-   - Supabase URL
-   - Supabase Anon Key
-   - Business ID (from Admin Dashboard)
+## API Keys You Need
+
+| Service | Where to Get | What For |
+|---------|--------------|----------|
+| **Supabase URL** | Supabase Dashboard → Settings → API | Database & Auth |
+| **Supabase Anon Key** | Supabase Dashboard → Settings → API | Public API access |
+| **OpenAI API Key** | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | AI replies & embeddings |
+| **Freshdesk API Key** | Freshdesk → Profile Picture → Profile Settings → Your API Key | Ticket scanning & learning |
+| **Shopify Access Token** | Shopify Admin → Settings → Apps → Develop apps → Create app | Order lookup (optional) |
+
+---
+
+## Detailed API Setup Instructions
+
+### OpenAI API Key
+
+1. Go to [platform.openai.com](https://platform.openai.com)
+2. Sign up or log in
+3. Click your profile → "API keys"
+4. Click "Create new secret key"
+5. Copy the key (starts with `sk-`)
+6. Add billing at Billing → Payment methods
+
+**Cost estimate**: ~$0.01-0.05 per reply generated
+
+### Freshdesk API Key
+
+1. Log in to your Freshdesk account
+2. Click your **profile picture** (top right)
+3. Select **"Profile Settings"**
+4. Scroll down to find **"Your API Key"**
+5. Copy the API key
+
+### Shopify Access Token (Optional)
+
+1. Go to Shopify Admin → **Settings** → **Apps and sales channels**
+2. Click **"Develop apps"** (may need to enable first)
+3. Click **"Create an app"** and name it "Freshdesk AI"
+4. Go to **Configuration** → **Admin API integration**
+5. Click **"Configure Admin API scopes"**
+6. Enable these scopes:
+   - `read_orders`
+   - `read_customers`
+   - `read_fulfillments`
+7. Click **Save** then **Install app**
+8. Click **"Reveal token once"** and copy the Admin API access token
+
+---
 
 ## Usage
 
 ### For Businesses (Admin Dashboard)
 
-1. **Sign Up**: Create an account at the admin dashboard
-2. **Configure Freshdesk**: Enter your Freshdesk domain and API key (optional)
-3. **Upload Documents**: Add your FAQs, policies, and documentation
-4. **Test**: Use the test area to verify AI responses
+1. **Sign Up**: Create an account at the admin dashboard (localhost:5173)
+2. **Configure Settings**:
+   - Enter your Freshdesk domain and API key
+   - (Optional) Enter your Shopify store domain and access token
+3. **Upload Documents**: Add your FAQs, return policies, product docs
+4. **Learn from Tickets**: Click "Learn from Past Tickets" to train AI on resolved tickets
+5. **Test**: Use the test area to verify AI responses
 
 ### For Support Agents (Chrome Extension)
 
 1. **Navigate to Freshdesk**: Open a ticket in your Freshdesk account
 2. **Open Extension**: Click the Freshdesk AI Assistant icon
-3. **Scan Ticket**: Click "Scan Ticket" to extract the customer message
-4. **Select Tone**: Choose professional, friendly, or concise
-5. **Generate Reply**: Click "Generate Reply" to get an AI suggestion
-6. **Edit & Insert**: Edit if needed, then click "Insert into Freshdesk"
+3. **Log In**: Use the same email/password from admin dashboard
+4. **Scan Ticket**: Click "Scan Ticket" to extract the customer message
+5. **Select Tone**: Choose professional, friendly, or concise
+6. **Generate Reply**: Click "Generate Reply" to get an AI suggestion
+7. **Edit & Insert**: Edit if needed, then click "Insert into Freshdesk"
 
-## API Endpoints
+---
 
-### `generate-reply`
+## Architecture
 
-Generates an AI-powered reply based on the knowledge base.
-
-```typescript
-POST /functions/v1/generate-reply
-
-Request:
-{
-  "businessId": "uuid",
-  "customerMessage": "string",
-  "tone": "professional" | "friendly" | "concise"
-}
-
-Response:
-{
-  "reply": "string",
-  "sources": [{ "snippet": "string", "similarity": number }],
-  "hasKnowledgeBase": boolean
-}
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Chrome         │     │  Supabase       │     │  OpenAI         │
+│  Extension      │────▶│  Edge Functions │────▶│  API            │
+│  (Freshdesk)    │     │  + PostgreSQL   │     │  (Embeddings +  │
+└─────────────────┘     │  + pgvector     │     │   GPT-4o-mini)  │
+        │               └─────────────────┘     └─────────────────┘
+        ▼                       │
+┌─────────────────┐            │
+│  Admin          │            ▼
+│  Dashboard      │     ┌─────────────────┐
+│  (React + Vite) │     │  Freshdesk API  │
+└─────────────────┘     │  Shopify API    │
+                        └─────────────────┘
 ```
 
-### `ingest-document`
+## Edge Functions
 
-Processes and stores a document in the knowledge base.
+| Function | Purpose |
+|----------|---------|
+| `generate-reply` | Generates AI replies using RAG |
+| `ingest-document` | Processes and stores documents with embeddings |
+| `learn-tickets` | Scans Freshdesk tickets to learn response patterns |
+| `shopify-orders` | Looks up customer orders from Shopify |
 
-```typescript
-POST /functions/v1/ingest-document
+---
 
-Request:
-{
-  "businessId": "uuid",
-  "documentContent": "string",
-  "documentName": "string"
-}
+## Troubleshooting
 
-Response:
-{
-  "success": boolean,
-  "documentId": "uuid",
-  "chunkCount": number
-}
-```
+### "Edge Function returned a non-2xx status code"
 
-## Development
-
-### Run Admin Dashboard
-
+This means the Edge Functions aren't deployed. Run:
 ```bash
-cd admin-dashboard
-npm run dev
+npx supabase functions deploy generate-reply --legacy-bundle --no-verify-jwt
+npx supabase functions deploy ingest-document --legacy-bundle --no-verify-jwt
 ```
 
-### Watch Extension Changes
+### "Docker Desktop is a prerequisite"
 
+You don't need Docker for production deployment. Use `--legacy-bundle` flag:
 ```bash
-cd extension
-npm run dev
+npx supabase functions deploy generate-reply --legacy-bundle --no-verify-jwt
 ```
 
-### Run Supabase Locally
+### Extension can't find ticket content
 
-```bash
-npx supabase start
-npx supabase functions serve
-```
+Freshdesk may update their DOM structure. Check `extension/src/utils/freshdesk.ts` and update the selectors if needed.
+
+### Document upload fails
+
+- Ensure document size is under 100KB
+- Check that the business ID exists in the database
+- Verify the Edge Function is deployed
+
+### AI replies are generic
+
+- Upload more relevant documents to the knowledge base
+- Use "Learn from Past Tickets" to train on your actual responses
+- Make sure documents contain specific information about your products/services
+
+---
 
 ## Environment Variables
 
 ### Root `.env`
-
 ```env
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
@@ -345,34 +332,12 @@ OPENAI_API_KEY=your-openai-api-key
 ```
 
 ### Admin Dashboard `.env`
-
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-## Troubleshooting
-
-### Extension can't find ticket content
-
-Freshdesk may update their DOM structure. Check `extension/src/utils/freshdesk.ts` and update the selectors if needed.
-
-### Edge Functions returning errors
-
-1. Check that secrets are set: `npx supabase secrets list`
-2. View function logs: `npx supabase functions logs generate-reply`
-
-### Document ingestion fails
-
-- Ensure document size is under 100KB
-- Check that the business ID exists in the database
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+---
 
 ## License
 

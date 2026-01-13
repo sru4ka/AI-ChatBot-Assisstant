@@ -10,9 +10,17 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
   const [name, setName] = useState(business.name)
   const [freshdeskDomain, setFreshdeskDomain] = useState(business.freshdesk_domain || '')
   const [freshdeskApiKey, setFreshdeskApiKey] = useState(business.freshdesk_api_key || '')
+  const [shopifyDomain, setShopifyDomain] = useState((business as any).shopify_domain || '')
+  const [shopifyAccessToken, setShopifyAccessToken] = useState((business as any).shopify_access_token || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  // Ticket learning state
+  const [learningTickets, setLearningTickets] = useState(false)
+  const [ticketCount, setTicketCount] = useState(100)
+  const [learnError, setLearnError] = useState<string | null>(null)
+  const [learnSuccess, setLearnSuccess] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -27,6 +35,8 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           name,
           freshdesk_domain: freshdeskDomain || null,
           freshdesk_api_key: freshdeskApiKey || null,
+          shopify_domain: shopifyDomain || null,
+          shopify_access_token: shopifyAccessToken || null,
         })
         .eq('id', business.id)
         .select()
@@ -44,75 +54,207 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
     }
   }
 
+  async function handleLearnFromTickets() {
+    if (!freshdeskDomain || !freshdeskApiKey) {
+      setLearnError('Please configure Freshdesk credentials first')
+      return
+    }
+
+    setLearningTickets(true)
+    setLearnError(null)
+    setLearnSuccess(null)
+
+    try {
+      const response = await supabase.functions.invoke('learn-tickets', {
+        body: {
+          businessId: business.id,
+          freshdeskDomain: freshdeskDomain.replace(/^https?:\/\//, ''),
+          freshdeskApiKey,
+          ticketCount,
+        },
+      })
+
+      if (response.error) {
+        throw new Error(response.error.message)
+      }
+
+      const data = response.data
+      setLearnSuccess(
+        `Successfully learned from ${data.conversationsLearned} resolved tickets! ` +
+        `(${data.chunksCreated} knowledge chunks created)`
+      )
+    } catch (err) {
+      setLearnError(err instanceof Error ? err.message : 'Failed to learn from tickets')
+    } finally {
+      setLearningTickets(false)
+    }
+  }
+
   return (
-    <form className="settings-form" onSubmit={handleSubmit}>
-      {error && <div className="error-message">{error}</div>}
-      {success && <div className="success-message">Settings saved successfully!</div>}
+    <div>
+      <form className="settings-form" onSubmit={handleSubmit}>
+        {error && <div className="error-message">{error}</div>}
+        {success && <div className="success-message">Settings saved successfully!</div>}
 
-      <div className="form-group">
-        <label htmlFor="businessName">Business Name</label>
-        <input
-          id="businessName"
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Your business name"
-          required
-        />
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="freshdeskDomain">Freshdesk Domain</label>
-        <input
-          id="freshdeskDomain"
-          type="text"
-          value={freshdeskDomain}
-          onChange={(e) => setFreshdeskDomain(e.target.value)}
-          placeholder="yourcompany.freshdesk.com"
-        />
-        <small style={{ color: '#666', fontSize: '0.85rem' }}>
-          Your Freshdesk subdomain (e.g., yourcompany.freshdesk.com)
-        </small>
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="freshdeskApiKey">Freshdesk API Key</label>
-        <input
-          id="freshdeskApiKey"
-          type="password"
-          value={freshdeskApiKey}
-          onChange={(e) => setFreshdeskApiKey(e.target.value)}
-          placeholder="Your Freshdesk API key"
-        />
-        <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#f0f7ff', borderRadius: '6px', border: '1px solid #d0e3ff' }}>
-          <strong style={{ fontSize: '0.85rem', color: '#1a56db' }}>How to find your API Key:</strong>
-          <ol style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.8rem', color: '#444', lineHeight: '1.6' }}>
-            <li>Log in to your Freshdesk account</li>
-            <li>Click your <strong>profile picture</strong> (top right corner)</li>
-            <li>Select <strong>"Profile Settings"</strong></li>
-            <li>Scroll down to find <strong>"Your API Key"</strong></li>
-            <li>Copy the API key and paste it here</li>
-          </ol>
-          {freshdeskDomain && (
-            <a
-              href={`https://${freshdeskDomain.replace(/^https?:\/\//, '')}/a/profile/settings`}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.8rem', color: '#1a56db' }}
-            >
-              Open your Freshdesk Profile Settings →
-            </a>
-          )}
-          <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', color: '#666' }}>
-            <strong>Note:</strong> Each user needs their own API key from their Freshdesk account.
-          </p>
+        <div className="form-group">
+          <label htmlFor="businessName">Business Name</label>
+          <input
+            id="businessName"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Your business name"
+            required
+          />
         </div>
-      </div>
 
-      <button type="submit" className="btn btn-primary" disabled={loading}>
-        {loading && <span className="spinner" />}
-        Save Settings
-      </button>
+        {/* Freshdesk Settings */}
+        <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' }}>
+          <h4 style={{ marginBottom: '1rem', color: '#495057' }}>Freshdesk Integration</h4>
+
+          <div className="form-group">
+            <label htmlFor="freshdeskDomain">Freshdesk Domain</label>
+            <input
+              id="freshdeskDomain"
+              type="text"
+              value={freshdeskDomain}
+              onChange={(e) => setFreshdeskDomain(e.target.value)}
+              placeholder="yourcompany.freshdesk.com"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Your Freshdesk subdomain (e.g., yourcompany.freshdesk.com)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="freshdeskApiKey">Freshdesk API Key</label>
+            <input
+              id="freshdeskApiKey"
+              type="password"
+              value={freshdeskApiKey}
+              onChange={(e) => setFreshdeskApiKey(e.target.value)}
+              placeholder="Your Freshdesk API key"
+            />
+            <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #d0e3ff' }}>
+              <strong style={{ fontSize: '0.85rem', color: '#1a56db' }}>How to find your API Key:</strong>
+              <ol style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.8rem', color: '#444', lineHeight: '1.6' }}>
+                <li>Log in to your Freshdesk account</li>
+                <li>Click your <strong>profile picture</strong> (top right corner)</li>
+                <li>Select <strong>"Profile Settings"</strong></li>
+                <li>Scroll down to find <strong>"Your API Key"</strong></li>
+                <li>Copy the API key and paste it here</li>
+              </ol>
+              {freshdeskDomain && (
+                <a
+                  href={`https://${freshdeskDomain.replace(/^https?:\/\//, '')}/a/profile/settings`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-block', marginTop: '0.5rem', fontSize: '0.8rem', color: '#1a56db' }}
+                >
+                  Open your Freshdesk Profile Settings →
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Shopify Settings */}
+        <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f0fff4', borderRadius: '8px', border: '1px solid #9ae6b4' }}>
+          <h4 style={{ marginBottom: '1rem', color: '#276749' }}>Shopify Integration (Optional)</h4>
+          <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '1rem' }}>
+            Connect Shopify to automatically include order info in AI replies.
+          </p>
+
+          <div className="form-group">
+            <label htmlFor="shopifyDomain">Shopify Store Domain</label>
+            <input
+              id="shopifyDomain"
+              type="text"
+              value={shopifyDomain}
+              onChange={(e) => setShopifyDomain(e.target.value)}
+              placeholder="your-store.myshopify.com"
+            />
+            <small style={{ color: '#666', fontSize: '0.85rem' }}>
+              Your Shopify store domain (e.g., your-store.myshopify.com)
+            </small>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="shopifyAccessToken">Shopify Access Token</label>
+            <input
+              id="shopifyAccessToken"
+              type="password"
+              value={shopifyAccessToken}
+              onChange={(e) => setShopifyAccessToken(e.target.value)}
+              placeholder="shpat_xxxxx..."
+            />
+            <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#fff', borderRadius: '6px', border: '1px solid #9ae6b4' }}>
+              <strong style={{ fontSize: '0.85rem', color: '#276749' }}>How to create Access Token:</strong>
+              <ol style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', fontSize: '0.8rem', color: '#444', lineHeight: '1.6' }}>
+                <li>Go to your Shopify Admin → <strong>Settings</strong> → <strong>Apps and sales channels</strong></li>
+                <li>Click <strong>"Develop apps"</strong> (top right)</li>
+                <li>Click <strong>"Create an app"</strong>, name it "Freshdesk AI"</li>
+                <li>Click <strong>"Configure Admin API scopes"</strong></li>
+                <li>Enable: <code>read_orders</code>, <code>read_customers</code>, <code>read_fulfillments</code></li>
+                <li>Click <strong>"Install app"</strong> then <strong>"Reveal token once"</strong></li>
+                <li>Copy the <strong>Admin API access token</strong> (starts with shpat_)</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" className="btn btn-primary" disabled={loading} style={{ marginTop: '1.5rem' }}>
+          {loading && <span className="spinner" />}
+          Save Settings
+        </button>
+      </form>
+
+      {/* Ticket Learning Section */}
+      <div style={{ marginTop: '2rem', padding: '1rem', background: '#fff7ed', borderRadius: '8px', border: '1px solid #fed7aa' }}>
+        <h4 style={{ marginBottom: '1rem', color: '#c2410c' }}>Learn from Past Tickets</h4>
+        <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '1rem' }}>
+          Scan your resolved Freshdesk tickets to teach the AI your response patterns.
+          This will analyze ticket conversations and add them to your knowledge base.
+        </p>
+
+        {learnError && <div className="error-message">{learnError}</div>}
+        {learnSuccess && <div className="success-message">{learnSuccess}</div>}
+
+        <div className="form-group">
+          <label htmlFor="ticketCount">Number of tickets to scan</label>
+          <select
+            id="ticketCount"
+            value={ticketCount}
+            onChange={(e) => setTicketCount(Number(e.target.value))}
+            style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ddd' }}
+          >
+            <option value={100}>100 tickets</option>
+            <option value={250}>250 tickets</option>
+            <option value={500}>500 tickets</option>
+            <option value={1000}>1000 tickets</option>
+          </select>
+          <small style={{ color: '#666', fontSize: '0.85rem' }}>
+            More tickets = better AI responses, but takes longer to process
+          </small>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={handleLearnFromTickets}
+          disabled={learningTickets || !freshdeskDomain || !freshdeskApiKey}
+          style={{ background: '#c2410c', width: '100%' }}
+        >
+          {learningTickets && <span className="spinner" />}
+          {learningTickets ? 'Learning from tickets...' : 'Learn from Past Tickets'}
+        </button>
+
+        {(!freshdeskDomain || !freshdeskApiKey) && (
+          <p style={{ fontSize: '0.8rem', color: '#c2410c', marginTop: '0.5rem' }}>
+            Please configure Freshdesk credentials above first.
+          </p>
+        )}
+      </div>
 
       {/* Business ID display for extension configuration */}
       <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8f9ff', borderRadius: '8px' }}>
@@ -133,6 +275,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           {business.id}
         </code>
       </div>
-    </form>
+    </div>
   )
 }
