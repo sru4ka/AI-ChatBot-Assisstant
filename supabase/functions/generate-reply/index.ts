@@ -11,6 +11,7 @@ interface RequestBody {
   businessId: string
   customerMessage: string
   tone?: 'professional' | 'friendly' | 'concise'
+  customPrompt?: string
 }
 
 interface ChunkResult {
@@ -34,7 +35,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { businessId, customerMessage, tone = 'professional' }: RequestBody = await req.json()
+    const { businessId, customerMessage, tone = 'professional', customPrompt }: RequestBody = await req.json()
 
     // Validate required fields
     if (!businessId || !customerMessage) {
@@ -84,7 +85,7 @@ Deno.serve(async (req: Request) => {
       concise: 'Be brief and to the point. Provide only essential information.',
     }
 
-    const systemPrompt = `You are a helpful customer support agent.
+    const systemPrompt = `You are a helpful customer support agent responding to a customer inquiry.
 
 INSTRUCTIONS:
 - Use ONLY the following knowledge base to answer the customer's question
@@ -93,6 +94,8 @@ INSTRUCTIONS:
 - Keep responses concise but complete
 - Never make up information not in the knowledge base
 - Do not mention that you're using a knowledge base or AI
+- Write as if you are a real support agent replying to the customer
+${customPrompt ? `\nADDITIONAL INSTRUCTIONS FROM USER:\n${customPrompt}` : ''}
 
 KNOWLEDGE BASE:
 ${hasContext ? context : 'No relevant documentation found for this query.'}

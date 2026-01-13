@@ -17,11 +17,15 @@ interface TicketInfo {
 interface StoredSettings {
   defaultTone: Tone
   autoScan: boolean
+  signature: string
+  customPrompt: string
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
   defaultTone: 'professional',
   autoScan: false,
+  signature: '',
+  customPrompt: '',
 }
 
 export default function Popup() {
@@ -56,7 +60,15 @@ export default function Popup() {
   useEffect(() => {
     init()
     loadSettings()
+    loadSavedState()
   }, [])
+
+  // Save state when reply changes
+  useEffect(() => {
+    if (generatedReply || ticketInfo) {
+      saveState()
+    }
+  }, [generatedReply, ticketInfo])
 
   async function loadSettings() {
     try {
@@ -68,6 +80,46 @@ export default function Popup() {
       }
     } catch (err) {
       console.error('Failed to load settings:', err)
+    }
+  }
+
+  async function loadSavedState() {
+    try {
+      const result = await chrome.storage.local.get(['freshdeskAiState'])
+      if (result.freshdeskAiState) {
+        const saved = result.freshdeskAiState
+        if (saved.generatedReply) setGeneratedReply(saved.generatedReply)
+        if (saved.ticketInfo) setTicketInfo(saved.ticketInfo)
+        if (saved.sources) setSources(saved.sources)
+      }
+    } catch (err) {
+      console.error('Failed to load saved state:', err)
+    }
+  }
+
+  async function saveState() {
+    try {
+      await chrome.storage.local.set({
+        freshdeskAiState: {
+          generatedReply,
+          ticketInfo,
+          sources,
+          savedAt: Date.now(),
+        }
+      })
+    } catch (err) {
+      console.error('Failed to save state:', err)
+    }
+  }
+
+  async function clearState() {
+    try {
+      await chrome.storage.local.remove(['freshdeskAiState'])
+      setGeneratedReply('')
+      setTicketInfo(null)
+      setSources([])
+    } catch (err) {
+      console.error('Failed to clear state:', err)
     }
   }
 
@@ -194,7 +246,11 @@ export default function Popup() {
     setError(null)
 
     try {
-      const response = await generateReply(ticketInfo.customerMessage, tone)
+      const response = await generateReply(
+        ticketInfo.customerMessage,
+        tone,
+        settings.customPrompt || undefined
+      )
       setGeneratedReply(response.reply)
       setSources(response.sources)
     } catch (err) {
@@ -211,8 +267,14 @@ export default function Popup() {
     setError(null)
 
     try {
+      // Append signature if set
+      let finalReply = generatedReply
+      if (settings.signature && settings.signature.trim()) {
+        finalReply = generatedReply + '\n\n' + settings.signature
+      }
+
       const response = await new Promise<{ success: boolean; error?: string }>((resolve) => {
-        chrome.runtime.sendMessage({ type: 'INSERT_REPLY', payload: generatedReply }, resolve)
+        chrome.runtime.sendMessage({ type: 'INSERT_REPLY', payload: finalReply }, resolve)
       })
 
       if (!response.success) {
@@ -220,6 +282,7 @@ export default function Popup() {
       }
 
       setSuccess('Reply inserted into Freshdesk!')
+      clearState() // Clear saved state after successful insert
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to insert reply')
@@ -404,6 +467,59 @@ export default function Popup() {
                 />
                 Auto-scan ticket when opening popup
               </label>
+            </div>
+
+            {/* Signature Settings */}
+            <div className="setting-group" style={{ marginTop: 20 }}>
+              <label style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Email Signature</label>
+              <p style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
+                This will be added to the end of every reply
+              </p>
+              <textarea
+                value={settings.signature}
+                onChange={(e) => {
+                  const newSettings = { ...settings, signature: e.target.value }
+                  saveSettings(newSettings)
+                }}
+                placeholder="Best regards,
+John Doe
+Support Team
+www.example.com"
+                style={{
+                  width: '100%',
+                  minHeight: 80,
+                  padding: 8,
+                  borderRadius: 6,
+                  border: '1px solid #ddd',
+                  fontSize: 12,
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+
+            {/* Custom AI Prompt */}
+            <div className="setting-group" style={{ marginTop: 20 }}>
+              <label style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Custom AI Instructions</label>
+              <p style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
+                Add extra instructions for the AI (e.g., "Always mention our 30-day return policy")
+              </p>
+              <textarea
+                value={settings.customPrompt}
+                onChange={(e) => {
+                  const newSettings = { ...settings, customPrompt: e.target.value }
+                  saveSettings(newSettings)
+                }}
+                placeholder="Optional: Add custom instructions for the AI..."
+                style={{
+                  width: '100%',
+                  minHeight: 60,
+                  padding: 8,
+                  borderRadius: 6,
+                  border: '1px solid #ddd',
+                  fontSize: 12,
+                  resize: 'vertical',
+                }}
+              />
             </div>
 
             {settingsSaved && (

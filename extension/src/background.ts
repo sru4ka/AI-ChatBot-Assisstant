@@ -176,3 +176,44 @@ chrome.runtime.onInstalled.addListener((details) => {
     console.log('Freshdesk AI Assistant updated')
   }
 })
+
+// Update icon based on current tab
+async function updateIcon(tabId: number, url?: string) {
+  if (!url) {
+    try {
+      const tab = await chrome.tabs.get(tabId)
+      url = tab.url
+    } catch {
+      return
+    }
+  }
+
+  const isOnFreshdesk = url?.includes('freshdesk.com') || false
+  const isOnTicket = /\/tickets?\/\d+/i.test(url || '')
+
+  // Set badge to indicate status
+  if (isOnTicket) {
+    // Green badge for ticket pages
+    chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId })
+    chrome.action.setBadgeText({ text: '✓', tabId })
+  } else if (isOnFreshdesk) {
+    // Blue badge for Freshdesk but not on ticket
+    chrome.action.setBadgeBackgroundColor({ color: '#3b82f6', tabId })
+    chrome.action.setBadgeText({ text: '●', tabId })
+  } else {
+    // No badge for other sites
+    chrome.action.setBadgeText({ text: '', tabId })
+  }
+}
+
+// Listen for tab updates
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url) {
+    updateIcon(tabId, tab.url)
+  }
+})
+
+// Listen for tab activation
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  updateIcon(activeInfo.tabId)
+})

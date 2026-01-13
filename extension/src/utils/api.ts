@@ -112,7 +112,8 @@ export async function isLoggedIn(): Promise<boolean> {
 // Generate reply using the logged-in user's business
 export async function generateReply(
   customerMessage: string,
-  tone: 'professional' | 'friendly' | 'concise' = 'professional'
+  tone: 'professional' | 'friendly' | 'concise' = 'professional',
+  customPrompt?: string
 ): Promise<GenerateReplyResponse> {
   const user = await getCurrentUser()
   if (!user) {
@@ -127,6 +128,7 @@ export async function generateReply(
       businessId: user.id,
       customerMessage,
       tone,
+      customPrompt: customPrompt || undefined,
     },
   })
 

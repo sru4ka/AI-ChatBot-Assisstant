@@ -3,7 +3,7 @@
   "name": "Freshdesk AI Assistant",
   "version": "1.0.2",
   "description": "AI-powered reply suggestions for Freshdesk tickets using your knowledge base",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "tabs"],
   "host_permissions": ["https://*.freshdesk.com/*"],
   "action": {
     "default_popup": "popup.html",
