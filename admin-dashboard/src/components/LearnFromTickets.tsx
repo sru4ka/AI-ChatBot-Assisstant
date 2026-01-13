@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase, Business } from '../lib/supabase'
 
 interface LearnFromTicketsProps {
@@ -6,15 +6,46 @@ interface LearnFromTicketsProps {
   onLearned: () => void
 }
 
+interface LearningHistoryItem {
+  id: string
+  date: string
+  ticketsScanned: number
+  conversationsLearned: number
+  chunksCreated: number
+  status: 'success' | 'error'
+  errorMessage?: string
+}
+
 export default function LearnFromTickets({ business, onLearned }: LearnFromTicketsProps) {
   const [learningTickets, setLearningTickets] = useState(false)
   const [ticketCount, setTicketCount] = useState(100)
   const [learnError, setLearnError] = useState<string | null>(null)
   const [learnSuccess, setLearnSuccess] = useState<string | null>(null)
+  const [history, setHistory] = useState<LearningHistoryItem[]>([])
 
   const freshdeskDomain = business.freshdesk_domain
   const freshdeskApiKey = business.freshdesk_api_key
   const isConfigured = freshdeskDomain && freshdeskApiKey
+
+  // Load history from localStorage
+  useEffect(() => {
+    const storageKey = `learning-history-${business.id}`
+    const stored = localStorage.getItem(storageKey)
+    if (stored) {
+      try {
+        setHistory(JSON.parse(stored))
+      } catch (e) {
+        console.error('Failed to parse learning history:', e)
+      }
+    }
+  }, [business.id])
+
+  // Save history to localStorage
+  function saveHistory(newHistory: LearningHistoryItem[]) {
+    const storageKey = `learning-history-${business.id}`
+    localStorage.setItem(storageKey, JSON.stringify(newHistory))
+    setHistory(newHistory)
+  }
 
   async function handleLearnFromTickets() {
     if (!freshdeskDomain || !freshdeskApiKey) {
@@ -25,6 +56,8 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
     setLearningTickets(true)
     setLearnError(null)
     setLearnSuccess(null)
+
+    const startTime = new Date()
 
     try {
       const response = await supabase.functions.invoke('learn-tickets', {
@@ -41,16 +74,57 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
       }
 
       const data = response.data
+
+      // Add to history
+      const historyItem: LearningHistoryItem = {
+        id: Date.now().toString(),
+        date: startTime.toISOString(),
+        ticketsScanned: ticketCount,
+        conversationsLearned: data.conversationsLearned || 0,
+        chunksCreated: data.chunksCreated || 0,
+        status: 'success',
+      }
+
+      const newHistory = [historyItem, ...history].slice(0, 10) // Keep last 10
+      saveHistory(newHistory)
+
       setLearnSuccess(
         `Successfully learned from ${data.conversationsLearned} resolved tickets! ` +
         `(${data.chunksCreated} knowledge chunks created)`
       )
       onLearned()
     } catch (err) {
-      setLearnError(err instanceof Error ? err.message : 'Failed to learn from tickets')
+      const errorMessage = err instanceof Error ? err.message : 'Failed to learn from tickets'
+
+      // Add error to history
+      const historyItem: LearningHistoryItem = {
+        id: Date.now().toString(),
+        date: startTime.toISOString(),
+        ticketsScanned: ticketCount,
+        conversationsLearned: 0,
+        chunksCreated: 0,
+        status: 'error',
+        errorMessage,
+      }
+
+      const newHistory = [historyItem, ...history].slice(0, 10)
+      saveHistory(newHistory)
+
+      setLearnError(errorMessage)
     } finally {
       setLearningTickets(false)
     }
+  }
+
+  function clearHistory() {
+    if (confirm('Clear all learning history?')) {
+      saveHistory([])
+    }
+  }
+
+  function formatDate(dateString: string) {
+    const date = new Date(dateString)
+    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
 
   return (
@@ -123,6 +197,64 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
             <div className="connected-info">
               <span className="status-dot connected"></span>
               Connected to: <strong>{freshdeskDomain}</strong>
+            </div>
+          )}
+
+          {/* Learning History */}
+          {history.length > 0 && (
+            <div className="learning-history" style={{ marginTop: '1.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: '600', color: '#444' }}>Learning History</h4>
+                <button
+                  onClick={clearHistory}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#999',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div style={{
+                background: '#f9fafb',
+                borderRadius: '8px',
+                overflow: 'hidden',
+                border: '1px solid #e5e7eb',
+              }}>
+                {history.map((item, index) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: '0.75rem 1rem',
+                      borderBottom: index < history.length - 1 ? '1px solid #e5e7eb' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                    }}
+                  >
+                    <span style={{ fontSize: '1.1rem' }}>
+                      {item.status === 'success' ? '✅' : '❌'}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '0.85rem', color: '#333' }}>
+                        {item.status === 'success' ? (
+                          <>
+                            <strong>{item.conversationsLearned}</strong> tickets → <strong>{item.chunksCreated}</strong> chunks
+                          </>
+                        ) : (
+                          <span style={{ color: '#dc2626' }}>{item.errorMessage || 'Failed'}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '2px' }}>
+                        {formatDate(item.date)} • Scanned {item.ticketsScanned} tickets
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </>
