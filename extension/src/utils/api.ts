@@ -82,7 +82,10 @@ export async function signUp(email: string, password: string, businessName: stri
   })
 
   if (bizError) {
-    console.error('Error creating business:', bizError)
+    // Only log if it's not a duplicate key error (business already exists is OK)
+    if (!bizError.message?.includes('duplicate') && !bizError.code?.includes('23505')) {
+      console.warn('Note: Could not create business record:', bizError.message || bizError.code || 'Unknown error')
+    }
     // Don't throw - user is created, business might already exist
   }
 

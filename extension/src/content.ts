@@ -22,6 +22,11 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   console.log('Content script received message:', message.type)
 
   switch (message.type) {
+    case 'PING':
+      // Simple ping to check if content script is loaded
+      sendResponse({ success: true })
+      return true
+
     case 'GET_TICKET_INFO':
       handleGetTicketInfo(sendResponse)
       return true
