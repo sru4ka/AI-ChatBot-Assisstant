@@ -118,7 +118,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
   const [websiteUrl, setWebsiteUrl] = useState((business as any).website_url || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState(false)
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
@@ -127,7 +126,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
     e.preventDefault()
     setLoading(true)
     setError(null)
-    setSuccess(false)
 
     try {
       const { data, error } = await supabase
@@ -147,9 +145,7 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
       if (error) throw error
 
       onUpdate(data)
-      setSuccess(true)
       setToast({ message: 'Settings saved successfully!', type: 'success' })
-      setTimeout(() => setSuccess(false), 3000)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update settings')
       setToast({ message: 'Failed to save settings', type: 'error' })
