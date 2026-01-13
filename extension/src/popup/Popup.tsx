@@ -6,8 +6,8 @@ type Tab = 'main' | 'account' | 'settings'
 type AuthMode = 'login' | 'signup'
 type Tone = 'professional' | 'friendly' | 'concise'
 
-// Admin Dashboard URL - Update this to your deployed dashboard URL
-const ADMIN_DASHBOARD_URL = 'https://freshdesk-ai-admin.vercel.app'
+// Admin Dashboard URL
+const ADMIN_DASHBOARD_URL = 'https://ai-chat-bot-assisstant.vercel.app'
 
 interface TicketInfo {
   customerMessage: string
