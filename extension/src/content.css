@@ -68,11 +68,12 @@
   background: #264fab;
 }
 
-/* Panel container */
+/* Panel container - positioned near the center-left for better visibility */
 .freshdesk-ai-panel-container {
   position: fixed;
-  bottom: 70px;
-  right: 20px;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 999999;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }

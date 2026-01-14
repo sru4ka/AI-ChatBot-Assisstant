@@ -19,6 +19,132 @@ interface ChunkResult {
   similarity: number
 }
 
+interface ShopifyOrder {
+  id: number
+  name: string
+  email: string
+  total_price: string
+  currency: string
+  financial_status: string
+  fulfillment_status: string | null
+  created_at: string
+  line_items: Array<{ title: string; quantity: number; price: string }>
+  tracking_numbers?: string[]
+  note?: string
+}
+
+/**
+ * Extract order numbers from text (e.g., #1234, Order 1234, order #1234)
+ */
+function extractOrderNumbers(text: string): string[] {
+  const patterns = [
+    /#(\d{3,})/g,                    // #1234
+    /order\s*#?\s*(\d{3,})/gi,       // Order 1234, order #1234
+    /order\s+number\s*:?\s*(\d{3,})/gi, // Order number: 1234
+  ]
+
+  const orderNumbers = new Set<string>()
+  for (const pattern of patterns) {
+    let match
+    while ((match = pattern.exec(text)) !== null) {
+      orderNumbers.add(match[1])
+    }
+  }
+
+  return Array.from(orderNumbers)
+}
+
+/**
+ * Fetch Shopify orders by order numbers
+ */
+async function fetchShopifyOrders(
+  storeDomain: string,
+  accessToken: string,
+  orderNumbers: string[]
+): Promise<ShopifyOrder[]> {
+  const orders: ShopifyOrder[] = []
+  const apiVersion = '2024-01'
+
+  for (const orderNum of orderNumbers.slice(0, 3)) { // Limit to 3 orders
+    try {
+      const url = `https://${storeDomain}/admin/api/${apiVersion}/orders.json?status=any&name=%23${orderNum}`
+      const response = await fetch(url, {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.orders && data.orders.length > 0) {
+          const order = data.orders[0]
+
+          // Try to get tracking numbers
+          try {
+            const fulfillmentsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/fulfillments.json`
+            const fulfillmentsResponse = await fetch(fulfillmentsUrl, {
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+              },
+            })
+            if (fulfillmentsResponse.ok) {
+              const fulfillmentsData = await fulfillmentsResponse.json()
+              order.tracking_numbers = (fulfillmentsData.fulfillments || [])
+                .map((f: { tracking_number?: string }) => f.tracking_number)
+                .filter(Boolean)
+            }
+          } catch (e) {
+            // Continue without tracking
+          }
+
+          orders.push(order)
+        }
+      }
+    } catch (e) {
+      console.warn(`Error fetching order ${orderNum}:`, e)
+    }
+  }
+
+  return orders
+}
+
+/**
+ * Format order data for AI context
+ */
+function formatOrdersForAI(orders: ShopifyOrder[]): string {
+  if (orders.length === 0) return ''
+
+  return orders.map(order => {
+    const lines = [
+      `ORDER ${order.name}:`,
+      `- Customer Email: ${order.email}`,
+      `- Order Date: ${new Date(order.created_at).toLocaleDateString()}`,
+      `- Payment Status: ${order.financial_status}`,
+      `- Fulfillment Status: ${order.fulfillment_status || 'Not yet fulfilled'}`,
+      `- Total: ${order.total_price} ${order.currency}`,
+    ]
+
+    if (order.line_items && order.line_items.length > 0) {
+      lines.push('- Items Ordered:')
+      order.line_items.forEach(item => {
+        lines.push(`  * ${item.title} (Qty: ${item.quantity}) - $${item.price}`)
+      })
+    }
+
+    if (order.tracking_numbers && order.tracking_numbers.length > 0) {
+      lines.push(`- Tracking Number(s): ${order.tracking_numbers.join(', ')}`)
+    }
+
+    if (order.note) {
+      lines.push(`- Order Notes: ${order.note}`)
+    }
+
+    return lines.join('\n')
+  }).join('\n\n')
+}
+
 Deno.serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -55,6 +181,35 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
+    // 0. Check for Shopify integration and fetch order data if order numbers found
+    let orderContext = ''
+    const orderNumbers = extractOrderNumbers(customerMessage)
+
+    if (orderNumbers.length > 0) {
+      console.log(`Found order numbers in message: ${orderNumbers.join(', ')}`)
+
+      // Get business Shopify credentials
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('shopify_domain, shopify_access_token')
+        .eq('id', businessId)
+        .single()
+
+      if (business?.shopify_domain && business?.shopify_access_token) {
+        console.log('Fetching Shopify order data...')
+        const orders = await fetchShopifyOrders(
+          business.shopify_domain,
+          business.shopify_access_token,
+          orderNumbers
+        )
+
+        if (orders.length > 0) {
+          orderContext = formatOrdersForAI(orders)
+          console.log(`Found ${orders.length} orders from Shopify`)
+        }
+      }
+    }
+
     // 1. Generate embedding for customer message
     const embeddingResponse = await openai.embeddings.create({
       model: 'text-embedding-3-small',
@@ -76,7 +231,7 @@ Deno.serve(async (req: Request) => {
 
     // Build context from retrieved chunks
     const context = (chunks as ChunkResult[])?.map((c) => c.content).join('\n\n') || ''
-    const hasContext = context.length > 0
+    const hasContext = context.length > 0 || orderContext.length > 0
 
     // 3. Build system prompt based on tone
     const toneInstructions = {
@@ -88,21 +243,25 @@ Deno.serve(async (req: Request) => {
     const systemPrompt = `You are a helpful customer support agent responding to a customer inquiry.
 
 INSTRUCTIONS:
-- Use ONLY the following knowledge base to answer the customer's question
-- If the answer is not in the knowledge base, politely say you'll check with the team and get back to them
+- Use the information provided below (order data and knowledge base) to answer the customer's question
+- If order data is provided, use it to give specific details about their order (items, status, tracking, etc.)
+- If the answer is not available, politely say you'll check with the team and get back to them
 - ${toneInstructions[tone]}
 - Keep responses concise but complete
-- Never make up information not in the knowledge base
+- Never make up information - only use what's provided
 - Do not mention that you're using a knowledge base or AI
 - Write as if you are a real support agent replying to the customer
 - DO NOT include any signature, sign-off, name, or closing like "Best regards, [Name]" - the user will add their own signature
 - End your response with the last relevant sentence of your answer
 ${customPrompt ? `\nADDITIONAL INSTRUCTIONS FROM USER:\n${customPrompt}` : ''}
-
+${orderContext ? `
+SHOPIFY ORDER DATA:
+${orderContext}
+` : ''}
 KNOWLEDGE BASE:
-${hasContext ? context : 'No relevant documentation found for this query.'}
+${context || 'No relevant documentation found for this query.'}
 
-${!hasContext ? 'Since no relevant documentation was found, acknowledge the question and offer to escalate to a specialist.' : ''}`
+${!hasContext ? 'Since no relevant information was found, acknowledge the question and offer to help or escalate to a specialist.' : ''}`
 
     // 4. Generate reply using GPT-4o-mini
     const completion = await openai.chat.completions.create({

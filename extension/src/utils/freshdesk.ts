@@ -390,9 +390,36 @@ export function insertReply(text: string): boolean {
     return true
   }
 
+  // Strategy 0: First, try to click on the Reply area to make sure editor is active/visible
+  const replyAreaSelectors = [
+    '.reply-click-area',
+    '[data-aid="reply-click-area"]',
+    '.reply-toggle',
+    '[class*="reply-area"]',
+  ]
+  for (const selector of replyAreaSelectors) {
+    try {
+      const replyArea = document.querySelector(selector) as HTMLElement
+      if (replyArea) {
+        replyArea.click()
+        // Wait a bit for editor to appear
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
   // Strategy 1: Look for Froala editor (very common in Freshdesk)
-  // Try multiple Froala selectors
+  // Try multiple Froala selectors - be more specific about finding the REPLY editor
   const froalaSelectors = [
+    // Most specific Freshdesk reply editor selectors
+    '.reply-editor .fr-element.fr-view',
+    '.reply-box .fr-element.fr-view',
+    '[class*="reply"] .fr-element.fr-view',
+    '[class*="reply"] .fr-element',
+    '.ticket-reply .fr-element',
+    '#reply-box .fr-element',
+    // General Froala selectors
     '.fr-element.fr-view',
     '.fr-element',
     '.fr-box .fr-element',
@@ -400,10 +427,21 @@ export function insertReply(text: string): boolean {
   ]
 
   for (const selector of froalaSelectors) {
-    const froalaEditor = document.querySelector(selector) as HTMLElement
-    if (froalaEditor && (froalaEditor.getAttribute('contenteditable') === 'true' || froalaEditor.isContentEditable)) {
-      console.log(`Freshdesk AI: Found Froala editor via ${selector}`)
-      return insertIntoEditor(froalaEditor)
+    try {
+      const editors = document.querySelectorAll(selector)
+      for (const editor of editors) {
+        const htmlEl = editor as HTMLElement
+        const rect = htmlEl.getBoundingClientRect()
+        // Make sure it's visible and a reasonable size for a reply editor
+        if (rect.width > 200 && rect.height > 50 && rect.bottom > 0 && rect.top < window.innerHeight) {
+          if (htmlEl.getAttribute('contenteditable') === 'true' || htmlEl.isContentEditable) {
+            console.log(`Freshdesk AI: Found Froala editor via ${selector}`)
+            return insertIntoEditor(htmlEl)
+          }
+        }
+      }
+    } catch (e) {
+      // Continue
     }
   }
 
