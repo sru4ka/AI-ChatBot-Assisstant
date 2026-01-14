@@ -17,9 +17,15 @@ interface Message {
   payload?: unknown
 }
 
-// State for the floating button
-let floatingContainer: HTMLElement | null = null
+// State
+let inlineButton: HTMLElement | null = null
+let panelContainer: HTMLElement | null = null
 let isGenerating = false
+let generatedReply = ''
+
+// Current settings
+let currentTone: 'professional' | 'friendly' | 'concise' = 'professional'
+let currentCustomPrompt = ''
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
@@ -27,7 +33,6 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
   switch (message.type) {
     case 'PING':
-      // Simple ping to check if content script is loaded
       sendResponse({ success: true })
       return true
 
@@ -46,10 +51,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 
 function handleGetTicketInfo(sendResponse: (response: unknown) => void) {
   if (!isOnTicketPage()) {
-    sendResponse({
-      success: false,
-      error: 'Not on a Freshdesk ticket page',
-    })
+    sendResponse({ success: false, error: 'Not on a Freshdesk ticket page' })
     return
   }
 
@@ -57,61 +59,148 @@ function handleGetTicketInfo(sendResponse: (response: unknown) => void) {
   const ticketSubject = getTicketSubject()
 
   if (!customerMessage) {
-    sendResponse({
-      success: false,
-      error: 'Could not find customer message on this page',
-    })
+    sendResponse({ success: false, error: 'Could not find customer message on this page' })
     return
   }
 
-  sendResponse({
-    success: true,
-    customerMessage,
-    ticketSubject,
-  })
+  sendResponse({ success: true, customerMessage, ticketSubject })
 }
 
 function handleInsertReply(reply: string, sendResponse: (response: unknown) => void) {
   if (!reply) {
-    sendResponse({
-      success: false,
-      error: 'No reply text provided',
-    })
+    sendResponse({ success: false, error: 'No reply text provided' })
     return
   }
 
   const success = insertReply(reply)
-
-  sendResponse({
-    success,
-    error: success ? undefined : 'Could not find reply text area',
-  })
+  sendResponse({ success, error: success ? undefined : 'Could not find reply text area' })
 }
 
-// Current settings for the floating button
-let currentTone: 'professional' | 'friendly' | 'concise' = 'professional'
-let currentCustomPrompt = ''
-
-// Create the floating "Reply with AI" button
-function createReplyWithAIButton() {
-  // Remove existing container if any
-  if (floatingContainer) {
-    floatingContainer.remove()
+// Find the Freshdesk action button area and inject our button
+function injectInlineButton() {
+  // Remove existing button if any
+  if (inlineButton) {
+    inlineButton.remove()
+    inlineButton = null
   }
 
-  floatingContainer = document.createElement('div')
-  floatingContainer.id = 'freshdesk-ai-reply-container'
-  floatingContainer.innerHTML = `
-    <div class="freshdesk-ai-btn-group">
-      <button id="freshdesk-ai-reply-btn" class="freshdesk-ai-floating-btn freshdesk-ai-main-btn">
-        <span class="btn-icon">✨</span>
-        <span class="btn-text">Reply with AI</span>
-      </button>
-      <button id="freshdesk-ai-dropdown-btn" class="freshdesk-ai-dropdown-toggle">
-        <span>▼</span>
-      </button>
-    </div>
-    <div id="freshdesk-ai-dropdown" class="freshdesk-ai-dropdown hidden">
+  // Selectors for Freshdesk action button areas
+  const actionBarSelectors = [
+    '.reply-actions',
+    '.ticket-actions',
+    '.action-buttons',
+    '[class*="reply-action"]',
+    '[class*="ticket-action"]',
+    '.conversation-actions',
+    '.btn-group',
+    // Look for the Forward button's parent
+    'button[title="Forward"]',
+    'a[title="Forward"]',
+    '[data-action="forward"]',
+    'button:contains("Forward")',
+  ]
+
+  let actionBar: Element | null = null
+  let forwardButton: Element | null = null
+
+  // First try to find the Forward button specifically
+  const forwardSelectors = [
+    'button[title="Forward"]',
+    'a[title="Forward"]',
+    '[data-action="forward"]',
+    'button[data-testid="forward"]',
+  ]
+
+  for (const selector of forwardSelectors) {
+    try {
+      forwardButton = document.querySelector(selector)
+      if (forwardButton) {
+        actionBar = forwardButton.parentElement
+        break
+      }
+    } catch (e) {
+      // Invalid selector, continue
+    }
+  }
+
+  // If we didn't find Forward button, look for action bar
+  if (!actionBar) {
+    for (const selector of actionBarSelectors) {
+      try {
+        const el = document.querySelector(selector)
+        if (el) {
+          actionBar = el
+          break
+        }
+      } catch (e) {
+        // Invalid selector, continue
+      }
+    }
+  }
+
+  // Also try finding by text content
+  if (!forwardButton) {
+    const allButtons = document.querySelectorAll('button, a[role="button"], .btn')
+    for (const btn of allButtons) {
+      if (btn.textContent?.toLowerCase().includes('forward')) {
+        forwardButton = btn
+        actionBar = btn.parentElement
+        break
+      }
+    }
+  }
+
+  // Create inline button
+  inlineButton = document.createElement('div')
+  inlineButton.id = 'freshdesk-ai-inline-btn'
+  inlineButton.className = 'freshdesk-ai-inline-wrapper'
+  inlineButton.innerHTML = `
+    <button class="freshdesk-ai-inline-btn" id="freshdesk-ai-main-btn">
+      <span class="ai-icon">✨</span>
+      <span>Reply with AI</span>
+    </button>
+    <button class="freshdesk-ai-inline-dropdown" id="freshdesk-ai-dropdown-toggle">
+      <span>▼</span>
+    </button>
+  `
+
+  // Insert button - either next to Forward or as floating fallback
+  if (forwardButton && forwardButton.parentElement) {
+    // Insert after Forward button
+    forwardButton.parentElement.insertBefore(inlineButton, forwardButton.nextSibling)
+    console.log('Freshdesk AI: Button injected next to Forward')
+  } else if (actionBar) {
+    // Append to action bar
+    actionBar.appendChild(inlineButton)
+    console.log('Freshdesk AI: Button injected into action bar')
+  } else {
+    // Fallback: floating button
+    inlineButton.classList.add('freshdesk-ai-floating')
+    document.body.appendChild(inlineButton)
+    console.log('Freshdesk AI: Button added as floating (fallback)')
+  }
+
+  // Create panel container (always floating)
+  createPanel()
+
+  // Load settings
+  loadButtonSettings()
+
+  // Add event listeners
+  setupEventListeners()
+}
+
+function createPanel() {
+  // Remove existing panel
+  if (panelContainer) {
+    panelContainer.remove()
+  }
+
+  panelContainer = document.createElement('div')
+  panelContainer.id = 'freshdesk-ai-panel-container'
+  panelContainer.className = 'freshdesk-ai-panel-container hidden'
+  panelContainer.innerHTML = `
+    <div id="freshdesk-ai-dropdown-menu" class="freshdesk-ai-dropdown-menu hidden">
       <div class="dropdown-section">
         <label>Response Tone</label>
         <div class="dropdown-tone-btns">
@@ -128,13 +217,13 @@ function createReplyWithAIButton() {
         <button id="freshdesk-ai-save-settings" class="dropdown-save-btn">Save & Close</button>
       </div>
     </div>
-    <div id="freshdesk-ai-panel" class="freshdesk-ai-panel hidden">
+    <div id="freshdesk-ai-result-panel" class="freshdesk-ai-result-panel hidden">
       <div class="panel-header">
         <span>AI Generated Reply</span>
         <button id="freshdesk-ai-close" class="panel-close">&times;</button>
       </div>
       <div id="freshdesk-ai-content" class="panel-content">
-        <div class="panel-placeholder">Click "Reply with AI" to generate a response</div>
+        <div class="panel-loading"><span class="spinner"></span> Analyzing ticket...</div>
       </div>
       <div class="panel-actions">
         <button id="freshdesk-ai-copy" class="panel-btn panel-btn-secondary" disabled>Copy</button>
@@ -143,37 +232,52 @@ function createReplyWithAIButton() {
     </div>
   `
 
-  document.body.appendChild(floatingContainer)
+  document.body.appendChild(panelContainer)
+}
 
-  // Load saved settings
-  loadButtonSettings()
-
-  // Add event listeners
-  const replyBtn = document.getElementById('freshdesk-ai-reply-btn')
-  const dropdownBtn = document.getElementById('freshdesk-ai-dropdown-btn')
-  const dropdown = document.getElementById('freshdesk-ai-dropdown')
+function setupEventListeners() {
+  const mainBtn = document.getElementById('freshdesk-ai-main-btn')
+  const dropdownToggle = document.getElementById('freshdesk-ai-dropdown-toggle')
+  const dropdownMenu = document.getElementById('freshdesk-ai-dropdown-menu')
+  const resultPanel = document.getElementById('freshdesk-ai-result-panel')
   const closeBtn = document.getElementById('freshdesk-ai-close')
   const copyBtn = document.getElementById('freshdesk-ai-copy')
   const insertBtn = document.getElementById('freshdesk-ai-insert')
-  const panel = document.getElementById('freshdesk-ai-panel')
   const saveSettingsBtn = document.getElementById('freshdesk-ai-save-settings')
   const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
 
-  replyBtn?.addEventListener('click', handleGenerateReply)
-  closeBtn?.addEventListener('click', () => panel?.classList.add('hidden'))
-  copyBtn?.addEventListener('click', handleCopyReply)
-  insertBtn?.addEventListener('click', handleInsertGeneratedReply)
-
-  // Dropdown toggle
-  dropdownBtn?.addEventListener('click', (e) => {
+  // Main button - auto scan and generate
+  mainBtn?.addEventListener('click', async (e) => {
+    e.preventDefault()
     e.stopPropagation()
-    dropdown?.classList.toggle('hidden')
-    panel?.classList.add('hidden')
+    dropdownMenu?.classList.add('hidden')
+    await handleGenerateReply()
   })
 
+  // Dropdown toggle
+  dropdownToggle?.addEventListener('click', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resultPanel?.classList.add('hidden')
+    dropdownMenu?.classList.toggle('hidden')
+    panelContainer?.classList.toggle('hidden', dropdownMenu?.classList.contains('hidden') ?? true)
+  })
+
+  // Close button
+  closeBtn?.addEventListener('click', () => {
+    resultPanel?.classList.add('hidden')
+    panelContainer?.classList.add('hidden')
+  })
+
+  // Copy button
+  copyBtn?.addEventListener('click', handleCopyReply)
+
+  // Insert button
+  insertBtn?.addEventListener('click', handleInsertGeneratedReply)
+
   // Tone buttons
-  const toneBtns = floatingContainer.querySelectorAll('.dropdown-tone-btn')
-  toneBtns.forEach(btn => {
+  const toneBtns = panelContainer?.querySelectorAll('.dropdown-tone-btn')
+  toneBtns?.forEach(btn => {
     btn.addEventListener('click', () => {
       toneBtns.forEach(b => b.classList.remove('active'))
       btn.classList.add('active')
@@ -181,18 +285,21 @@ function createReplyWithAIButton() {
     })
   })
 
-  // Save settings button
+  // Save settings
   saveSettingsBtn?.addEventListener('click', () => {
     currentCustomPrompt = customPromptInput?.value || ''
     saveButtonSettings()
-    dropdown?.classList.add('hidden')
+    dropdownMenu?.classList.add('hidden')
+    panelContainer?.classList.add('hidden')
     showToast('Settings saved!', 'success')
   })
 
-  // Close dropdown when clicking outside
+  // Close when clicking outside
   document.addEventListener('click', (e) => {
-    if (!floatingContainer?.contains(e.target as Node)) {
-      dropdown?.classList.add('hidden')
+    const target = e.target as Node
+    if (!inlineButton?.contains(target) && !panelContainer?.contains(target)) {
+      dropdownMenu?.classList.add('hidden')
+      // Don't close result panel when clicking outside
     }
   })
 }
@@ -201,7 +308,6 @@ async function loadButtonSettings() {
   try {
     const result = await chrome.storage.local.get(['freshdeskAiSettings', 'defaultTone', 'customPrompt'])
 
-    // Load from popup settings if available
     if (result.freshdeskAiSettings) {
       currentTone = result.freshdeskAiSettings.defaultTone || 'professional'
       currentCustomPrompt = result.freshdeskAiSettings.customPrompt || ''
@@ -227,7 +333,6 @@ async function loadButtonSettings() {
 
 async function saveButtonSettings() {
   try {
-    // Get existing settings and merge
     const result = await chrome.storage.local.get(['freshdeskAiSettings'])
     const existingSettings = result.freshdeskAiSettings || {}
 
@@ -245,41 +350,40 @@ async function saveButtonSettings() {
   }
 }
 
-// Store the generated reply
-let generatedReply = ''
-
 async function handleGenerateReply() {
   if (isGenerating) return
 
-  const panel = document.getElementById('freshdesk-ai-panel')
+  const resultPanel = document.getElementById('freshdesk-ai-result-panel')
   const content = document.getElementById('freshdesk-ai-content')
   const copyBtn = document.getElementById('freshdesk-ai-copy') as HTMLButtonElement
   const insertBtn = document.getElementById('freshdesk-ai-insert') as HTMLButtonElement
-  const replyBtn = document.getElementById('freshdesk-ai-reply-btn')
+  const mainBtn = document.getElementById('freshdesk-ai-main-btn')
 
-  if (!panel || !content || !replyBtn) return
+  if (!resultPanel || !content || !panelContainer) return
 
   // Show panel and loading state
-  panel.classList.remove('hidden')
+  panelContainer.classList.remove('hidden')
+  resultPanel.classList.remove('hidden')
   isGenerating = true
-  replyBtn.innerHTML = '<span class="btn-icon">⏳</span><span class="btn-text">Generating...</span>'
-  content.innerHTML = '<div class="panel-loading"><span class="spinner"></span> Analyzing ticket and generating reply...</div>'
+
+  if (mainBtn) {
+    mainBtn.innerHTML = '<span class="ai-icon">⏳</span><span>Generating...</span>'
+  }
+  content.innerHTML = '<div class="panel-loading"><span class="spinner"></span> Scanning ticket and generating reply...</div>'
 
   if (copyBtn) copyBtn.disabled = true
   if (insertBtn) insertBtn.disabled = true
 
   try {
-    // Get ticket info
+    // Auto-scan: Get ticket info
     const customerMessage = getLatestCustomerMessage()
     if (!customerMessage) {
-      throw new Error('Could not find customer message')
+      throw new Error('Could not find customer message on this page')
     }
 
-    // Get settings - use currentTone and currentCustomPrompt from dropdown, signature from storage
+    // Get signature from settings
     const settings = await chrome.storage.local.get(['freshdeskAiSettings'])
     const signature = settings.freshdeskAiSettings?.signature || ''
-    const tone = currentTone
-    const customPrompt = currentCustomPrompt
 
     // Get auth session
     const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
@@ -300,8 +404,8 @@ async function handleGenerateReply() {
       body: JSON.stringify({
         businessId: authData.user?.id,
         customerMessage,
-        tone,
-        customPrompt: customPrompt || undefined,
+        tone: currentTone,
+        customPrompt: currentCustomPrompt || undefined,
       }),
     })
 
@@ -319,14 +423,16 @@ async function handleGenerateReply() {
     if (copyBtn) copyBtn.disabled = false
     if (insertBtn) insertBtn.disabled = false
 
-    showToast('Reply generated successfully!', 'success')
+    showToast('Reply generated!', 'success')
   } catch (error) {
     console.error('Error generating reply:', error)
     content.innerHTML = `<div class="panel-error">Error: ${error instanceof Error ? error.message : 'Failed to generate reply'}</div>`
     showToast(error instanceof Error ? error.message : 'Failed to generate reply', 'error')
   } finally {
     isGenerating = false
-    replyBtn.innerHTML = '<span class="btn-icon">✨</span><span class="btn-text">Reply with AI</span>'
+    if (mainBtn) {
+      mainBtn.innerHTML = '<span class="ai-icon">✨</span><span>Reply with AI</span>'
+    }
   }
 }
 
@@ -334,7 +440,7 @@ function handleCopyReply() {
   if (!generatedReply) return
 
   navigator.clipboard.writeText(generatedReply).then(() => {
-    showToast('Reply copied to clipboard!', 'success')
+    showToast('Copied to clipboard!', 'success')
   }).catch(() => {
     showToast('Failed to copy', 'error')
   })
@@ -346,15 +452,20 @@ function handleInsertGeneratedReply() {
   const success = insertReply(generatedReply)
   if (success) {
     showToast('Reply inserted!', 'success')
-    const panel = document.getElementById('freshdesk-ai-panel')
-    panel?.classList.add('hidden')
+    const resultPanel = document.getElementById('freshdesk-ai-result-panel')
+    resultPanel?.classList.add('hidden')
+    panelContainer?.classList.add('hidden')
   } else {
-    showToast('Could not insert reply - try copying instead', 'error')
+    // Fallback: copy to clipboard
+    navigator.clipboard.writeText(generatedReply).then(() => {
+      showToast('Copied to clipboard - paste manually', 'success')
+    }).catch(() => {
+      showToast('Could not insert - please copy manually', 'error')
+    })
   }
 }
 
 function showToast(message: string, type: 'success' | 'error') {
-  // Remove existing toast
   const existingToast = document.querySelector('.freshdesk-ai-toast')
   if (existingToast) existingToast.remove()
 
@@ -366,22 +477,26 @@ function showToast(message: string, type: 'success' | 'error') {
   setTimeout(() => toast.remove(), 3000)
 }
 
-// Remove the floating button
-function removeReplyButton() {
-  if (floatingContainer) {
-    floatingContainer.remove()
-    floatingContainer = null
+function removeButton() {
+  if (inlineButton) {
+    inlineButton.remove()
+    inlineButton = null
+  }
+  if (panelContainer) {
+    panelContainer.remove()
+    panelContainer = null
   }
 }
 
-// Initialize content script
+// Initialize
 function init() {
   console.log('Freshdesk AI Assistant content script loaded')
 
-  // Check if we're on a ticket page
   if (isOnTicketPage()) {
-    createReplyWithAIButton()
-    console.log('On Freshdesk ticket page - button created')
+    // Delay injection to let Freshdesk UI load
+    setTimeout(() => {
+      injectInlineButton()
+    }, 1000)
   }
 
   // Watch for URL changes (Freshdesk is a SPA)
@@ -392,11 +507,12 @@ function init() {
       console.log('URL changed:', lastUrl)
 
       if (isOnTicketPage()) {
-        console.log('Navigated to ticket page')
-        createReplyWithAIButton()
+        setTimeout(() => {
+          injectInlineButton()
+        }, 1000)
       } else {
         removeFloatingButton()
-        removeReplyButton()
+        removeButton()
       }
     }
   })
@@ -404,7 +520,7 @@ function init() {
   observer.observe(document.body, { childList: true, subtree: true })
 }
 
-// Run initialization when DOM is ready
+// Run initialization
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init)
 } else {
