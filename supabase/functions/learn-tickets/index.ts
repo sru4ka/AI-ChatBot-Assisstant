@@ -11,7 +11,7 @@ interface RequestBody {
   businessId: string
   freshdeskDomain: string
   freshdeskApiKey: string
-  ticketCount: number // 100-1000
+  ticketCount: number // 100-5000
 }
 
 interface FreshdeskTicket {
@@ -40,18 +40,19 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
 
   console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
-  // Method 1: Use search API to find resolved and closed tickets
-  // Freshdesk Search API returns max 30 results per page, max 10 pages (300 per status)
-  for (const status of [5, 4]) { // Prioritize closed (5) since resolved (4) become closed
+  // Method 1: Use filter API to get closed and resolved tickets directly
+  // Filter API supports up to 10,000 tickets with pagination
+  for (const filter of ['closed', 'resolved']) {
     if (tickets.length >= count) break
 
     let page = 1
-    const maxPages = 10 // Freshdesk search limit
+    const maxPages = Math.ceil(count / perPage) + 5 // Allow extra pages
 
     while (page <= maxPages && tickets.length < count) {
       try {
+        // Use the filter endpoint which is more reliable for getting specific statuses
         const response = await fetch(
-          `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+          `https://${domain}/api/v2/tickets?filter=${filter}&per_page=${perPage}&page=${page}&include=description`,
           {
             headers: {
               'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
@@ -61,42 +62,96 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
         )
 
         if (!response.ok) {
-          console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
+          console.log(`Filter API returned ${response.status} for ${filter}, page ${page}`)
           break
         }
 
         const data = await response.json()
-        if (!data.results || data.results.length === 0) {
-          console.log(`No more results for status ${status} at page ${page}`)
+        if (!data || data.length === 0) {
+          console.log(`No more results for ${filter} at page ${page}`)
           break
         }
 
         // Filter out duplicates
-        const newTickets = data.results.filter((t: FreshdeskTicket) => !existingIds.has(t.id))
+        const newTickets = data.filter((t: FreshdeskTicket) => !existingIds.has(t.id))
         newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
         tickets.push(...newTickets)
 
-        console.log(`Found ${newTickets.length} tickets with status ${status} on page ${page}`)
+        console.log(`Found ${newTickets.length} ${filter} tickets on page ${page} (total: ${tickets.length})`)
         page++
 
-        // Freshdesk rate limit: 50 requests per minute for search
-        await new Promise(resolve => setTimeout(resolve, 150))
+        // Freshdesk rate limit
+        await new Promise(resolve => setTimeout(resolve, 100))
 
       } catch (err) {
-        console.error(`Error searching status ${status}:`, err)
+        console.error(`Error fetching ${filter} tickets:`, err)
         break
       }
     }
   }
 
-  console.log(`Search API found ${tickets.length} tickets total`)
+  console.log(`Filter API found ${tickets.length} tickets total`)
 
-  // Method 2: If search didn't find enough, use standard tickets API with filter
-  // Standard API can return 100 per page, we'll go up to 50 pages (5000 tickets to check)
+  // Method 2: If filter didn't find enough, use search API as supplement
+  // Freshdesk Search API returns max 30 results per page, max 10 pages (300 per status)
   if (tickets.length < count) {
-    console.log('Supplementing with standard tickets API...')
+    console.log('Supplementing with search API...')
 
-    const maxPages = Math.ceil((count * 2) / perPage) // Check 2x the needed amount
+    for (const status of [5, 4]) { // Closed (5), Resolved (4)
+      if (tickets.length >= count) break
+
+      let page = 1
+      const maxPages = 10 // Freshdesk search limit
+
+      while (page <= maxPages && tickets.length < count) {
+        try {
+          const response = await fetch(
+            `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+            {
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+                'Content-Type': 'application/json',
+              },
+            }
+          )
+
+          if (!response.ok) {
+            console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
+            break
+          }
+
+          const data = await response.json()
+          if (!data.results || data.results.length === 0) {
+            break
+          }
+
+          // Filter out duplicates
+          const newTickets = data.results.filter((t: FreshdeskTicket) => !existingIds.has(t.id))
+          newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+          tickets.push(...newTickets)
+
+          console.log(`Search found ${newTickets.length} tickets with status ${status} on page ${page}`)
+          page++
+
+          await new Promise(resolve => setTimeout(resolve, 150))
+
+        } catch (err) {
+          console.error(`Error searching status ${status}:`, err)
+          break
+        }
+      }
+    }
+  }
+
+  // Method 3: If still not enough, scan ALL tickets with standard API
+  // This is slower but comprehensive
+  if (tickets.length < count) {
+    console.log('Scanning all tickets with standard API...')
+
+    // Calculate how many pages we need to check based on what we still need
+    // Assume ~30-50% of tickets are resolved/closed, so check extra pages
+    const remainingNeeded = count - tickets.length
+    const maxPages = Math.ceil(remainingNeeded * 3 / perPage) + 10
     let consecutiveEmptyPages = 0
 
     for (let page = 1; page <= maxPages && tickets.length < count; page++) {
@@ -135,7 +190,7 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
 
         console.log(`Page ${page}: found ${newTickets.length} new resolved/closed tickets (total: ${tickets.length})`)
 
-        // Rate limit - standard API limit is higher but be safe
+        // Rate limit
         await new Promise(resolve => setTimeout(resolve, 80))
 
       } catch (err) {
@@ -232,7 +287,7 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const count = Math.min(Math.max(ticketCount || 100, 10), 2500)
+    const count = Math.min(Math.max(ticketCount || 100, 10), 5000)
 
     console.log(`Fetching ${count} tickets from ${freshdeskDomain}...`)
 

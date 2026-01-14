@@ -204,6 +204,8 @@ export default function LearnFromTickets({ business, onLearned }: LearnFromTicke
                 <option value={1000}>1000 tickets</option>
                 <option value={2000}>2000 tickets</option>
                 <option value={2500}>2500 tickets</option>
+                <option value={3000}>3000 tickets</option>
+                <option value={5000}>5000 tickets</option>
               </select>
               {!learningTickets && (
                 <small style={{ display: 'block', marginTop: '0.5rem', color: '#666', fontSize: '0.8rem' }}>
