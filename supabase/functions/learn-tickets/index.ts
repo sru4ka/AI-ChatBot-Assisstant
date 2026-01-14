@@ -56,11 +56,9 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
     // We'll search by created_at in chunks
     const dateRanges = [
       '', // No date filter first (gets most recent 300)
-      "created_at:>'2024-01-01'",
-      "created_at:>'2023-01-01' AND created_at:<'2024-01-01'",
-      "created_at:>'2022-01-01' AND created_at:<'2023-01-01'",
-      "created_at:>'2021-01-01' AND created_at:<'2022-01-01'",
-      "created_at:<'2021-01-01'",
+      "created_at:>'2025-01-01'", // 2025-2026
+      "created_at:>'2024-01-01' AND created_at:<'2025-01-01'", // 2024
+      "created_at:>'2023-01-01' AND created_at:<'2024-01-01'", // 2023
     ]
 
     for (const dateFilter of dateRanges) {
