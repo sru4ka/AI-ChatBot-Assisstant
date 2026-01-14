@@ -19,7 +19,7 @@ interface Message {
 }
 
 // State
-let inlineButton: HTMLElement | null = null
+let inlineButtons: HTMLElement[] = []
 let panelContainer: HTMLElement | null = null
 let isGenerating = false
 let generatedReply = ''
@@ -77,34 +77,28 @@ function handleInsertReply(reply: string, sendResponse: (response: unknown) => v
   sendResponse({ success, error: success ? undefined : 'Could not find reply text area' })
 }
 
-// Find the Freshdesk action button area and inject our button
-function injectInlineButton() {
-  // Remove existing button if any
-  if (inlineButton) {
-    inlineButton.remove()
-    inlineButton = null
-  }
+// Create button element with unique ID
+function createButtonElement(id: string): HTMLElement {
+  const btn = document.createElement('div')
+  btn.id = id
+  btn.className = 'freshdesk-ai-inline-wrapper'
+  btn.innerHTML = `
+    <button class="freshdesk-ai-inline-btn freshdesk-ai-main-btn">
+      <span class="ai-icon">✨</span>
+      <span>Reply with AI</span>
+    </button>
+    <button class="freshdesk-ai-inline-dropdown freshdesk-ai-dropdown-toggle">
+      <span>▼</span>
+    </button>
+  `
+  return btn
+}
 
-  // Selectors for Freshdesk action button areas
-  const actionBarSelectors = [
-    '.reply-actions',
-    '.ticket-actions',
-    '.action-buttons',
-    '[class*="reply-action"]',
-    '[class*="ticket-action"]',
-    '.conversation-actions',
-    '.btn-group',
-    // Look for the Forward button's parent
-    'button[title="Forward"]',
-    'a[title="Forward"]',
-    '[data-action="forward"]',
-    'button:contains("Forward")',
-  ]
+// Find all Forward buttons on the page (there may be multiple action bars)
+function findAllForwardButtons(): Element[] {
+  const forwardButtons: Element[] = []
 
-  let actionBar: Element | null = null
-  let forwardButton: Element | null = null
-
-  // First try to find the Forward button specifically
+  // Selectors for Forward button
   const forwardSelectors = [
     'button[title="Forward"]',
     'a[title="Forward"]',
@@ -114,80 +108,107 @@ function injectInlineButton() {
 
   for (const selector of forwardSelectors) {
     try {
-      forwardButton = document.querySelector(selector)
-      if (forwardButton) {
-        actionBar = forwardButton.parentElement
-        break
-      }
+      const buttons = document.querySelectorAll(selector)
+      buttons.forEach(btn => {
+        if (!forwardButtons.includes(btn)) {
+          forwardButtons.push(btn)
+        }
+      })
     } catch (e) {
       // Invalid selector, continue
     }
   }
 
-  // If we didn't find Forward button, look for action bar
-  if (!actionBar) {
+  // Also try finding by text content
+  const allButtons = document.querySelectorAll('button, a[role="button"], .btn, [role="button"]')
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim().toLowerCase()
+    if (text === 'forward' || (btn as HTMLElement).title?.toLowerCase() === 'forward') {
+      if (!forwardButtons.includes(btn)) {
+        forwardButtons.push(btn)
+      }
+    }
+  }
+
+  return forwardButtons
+}
+
+// Find the Freshdesk action button areas and inject our button
+function injectInlineButton() {
+  // Remove existing buttons
+  inlineButtons.forEach(btn => btn.remove())
+  inlineButtons = []
+
+  // Find all Forward buttons (top and bottom action bars)
+  const forwardButtons = findAllForwardButtons()
+
+  console.log(`Freshdesk AI: Found ${forwardButtons.length} Forward buttons`)
+
+  let injectedCount = 0
+
+  // Inject a button next to each Forward button
+  forwardButtons.forEach((forwardBtn, index) => {
+    const parent = forwardBtn.parentElement
+    if (parent) {
+      // Check if we already added a button here
+      if (parent.querySelector('.freshdesk-ai-inline-wrapper')) {
+        return
+      }
+
+      const btn = createButtonElement(`freshdesk-ai-inline-btn-${index}`)
+      parent.insertBefore(btn, forwardBtn.nextSibling)
+      inlineButtons.push(btn)
+      injectedCount++
+    }
+  })
+
+  // If no Forward buttons found, try action bar selectors
+  if (injectedCount === 0) {
+    const actionBarSelectors = [
+      '.reply-actions',
+      '.ticket-actions',
+      '.action-buttons',
+      '[class*="reply-action"]',
+      '[class*="ticket-action"]',
+      '.conversation-actions',
+    ]
+
     for (const selector of actionBarSelectors) {
       try {
-        const el = document.querySelector(selector)
-        if (el) {
-          actionBar = el
-          break
-        }
+        const bars = document.querySelectorAll(selector)
+        bars.forEach((bar, index) => {
+          if (!bar.querySelector('.freshdesk-ai-inline-wrapper')) {
+            const btn = createButtonElement(`freshdesk-ai-inline-btn-bar-${index}`)
+            bar.appendChild(btn)
+            inlineButtons.push(btn)
+            injectedCount++
+          }
+        })
+        if (injectedCount > 0) break
       } catch (e) {
-        // Invalid selector, continue
+        // Continue
       }
     }
   }
 
-  // Also try finding by text content
-  if (!forwardButton) {
-    const allButtons = document.querySelectorAll('button, a[role="button"], .btn')
-    for (const btn of allButtons) {
-      if (btn.textContent?.toLowerCase().includes('forward')) {
-        forwardButton = btn
-        actionBar = btn.parentElement
-        break
-      }
-    }
-  }
-
-  // Create inline button
-  inlineButton = document.createElement('div')
-  inlineButton.id = 'freshdesk-ai-inline-btn'
-  inlineButton.className = 'freshdesk-ai-inline-wrapper'
-  inlineButton.innerHTML = `
-    <button class="freshdesk-ai-inline-btn" id="freshdesk-ai-main-btn">
-      <span class="ai-icon">✨</span>
-      <span>Reply with AI</span>
-    </button>
-    <button class="freshdesk-ai-inline-dropdown" id="freshdesk-ai-dropdown-toggle">
-      <span>▼</span>
-    </button>
-  `
-
-  // Insert button - either next to Forward or as floating fallback
-  if (forwardButton && forwardButton.parentElement) {
-    // Insert after Forward button
-    forwardButton.parentElement.insertBefore(inlineButton, forwardButton.nextSibling)
-    console.log('Freshdesk AI: Button injected next to Forward')
-  } else if (actionBar) {
-    // Append to action bar
-    actionBar.appendChild(inlineButton)
-    console.log('Freshdesk AI: Button injected into action bar')
-  } else {
-    // Fallback: floating button
-    inlineButton.classList.add('freshdesk-ai-floating')
-    document.body.appendChild(inlineButton)
+  // Fallback: floating button if no injection points found
+  if (injectedCount === 0) {
+    const btn = createButtonElement('freshdesk-ai-inline-btn-floating')
+    btn.classList.add('freshdesk-ai-floating')
+    document.body.appendChild(btn)
+    inlineButtons.push(btn)
     console.log('Freshdesk AI: Button added as floating (fallback)')
+  } else {
+    console.log(`Freshdesk AI: Injected ${injectedCount} buttons`)
   }
 
-  // Create panel container (always floating)
+  // Create panel container (always floating, shared by all buttons)
   createPanel()
 
   // Load settings
   loadButtonSettings()
 
-  // Add event listeners
+  // Add event listeners to all buttons
   setupEventListeners()
 }
 
@@ -237,8 +258,6 @@ function createPanel() {
 }
 
 function setupEventListeners() {
-  const mainBtn = document.getElementById('freshdesk-ai-main-btn')
-  const dropdownToggle = document.getElementById('freshdesk-ai-dropdown-toggle')
   const dropdownMenu = document.getElementById('freshdesk-ai-dropdown-menu')
   const resultPanel = document.getElementById('freshdesk-ai-result-panel')
   const closeBtn = document.getElementById('freshdesk-ai-close')
@@ -247,21 +266,27 @@ function setupEventListeners() {
   const saveSettingsBtn = document.getElementById('freshdesk-ai-save-settings')
   const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
 
-  // Main button - auto scan and generate
-  mainBtn?.addEventListener('click', async (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dropdownMenu?.classList.add('hidden')
-    await handleGenerateReply()
+  // Add event listeners to all main buttons (there may be multiple)
+  const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
+  mainBtns.forEach(mainBtn => {
+    mainBtn.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      dropdownMenu?.classList.add('hidden')
+      await handleGenerateReply()
+    })
   })
 
-  // Dropdown toggle
-  dropdownToggle?.addEventListener('click', (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    resultPanel?.classList.add('hidden')
-    dropdownMenu?.classList.toggle('hidden')
-    panelContainer?.classList.toggle('hidden', dropdownMenu?.classList.contains('hidden') ?? true)
+  // Add event listeners to all dropdown toggles
+  const dropdownToggles = document.querySelectorAll('.freshdesk-ai-dropdown-toggle')
+  dropdownToggles.forEach(dropdownToggle => {
+    dropdownToggle.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      resultPanel?.classList.add('hidden')
+      dropdownMenu?.classList.toggle('hidden')
+      panelContainer?.classList.toggle('hidden', dropdownMenu?.classList.contains('hidden') ?? true)
+    })
   })
 
   // Close button
@@ -298,7 +323,8 @@ function setupEventListeners() {
   // Close when clicking outside
   document.addEventListener('click', (e) => {
     const target = e.target as Node
-    if (!inlineButton?.contains(target) && !panelContainer?.contains(target)) {
+    const clickedOnButton = inlineButtons.some(btn => btn.contains(target))
+    if (!clickedOnButton && !panelContainer?.contains(target)) {
       dropdownMenu?.classList.add('hidden')
       // Don't close result panel when clicking outside
     }
@@ -358,7 +384,7 @@ async function handleGenerateReply() {
   const content = document.getElementById('freshdesk-ai-content')
   const copyBtn = document.getElementById('freshdesk-ai-copy') as HTMLButtonElement
   const insertBtn = document.getElementById('freshdesk-ai-insert') as HTMLButtonElement
-  const mainBtn = document.getElementById('freshdesk-ai-main-btn')
+  const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
 
   if (!resultPanel || !content || !panelContainer) return
 
@@ -367,9 +393,10 @@ async function handleGenerateReply() {
   resultPanel.classList.remove('hidden')
   isGenerating = true
 
-  if (mainBtn) {
-    mainBtn.innerHTML = '<span class="ai-icon">⏳</span><span>Generating...</span>'
-  }
+  // Update all buttons to show loading state
+  mainBtns.forEach(btn => {
+    btn.innerHTML = '<span class="ai-icon">⏳</span><span>Generating...</span>'
+  })
   content.innerHTML = '<div class="panel-loading"><span class="spinner"></span> Scanning ticket and generating reply...</div>'
 
   if (copyBtn) copyBtn.disabled = true
@@ -444,9 +471,11 @@ async function handleGenerateReply() {
     showToast(error instanceof Error ? error.message : 'Failed to generate reply', 'error')
   } finally {
     isGenerating = false
-    if (mainBtn) {
-      mainBtn.innerHTML = '<span class="ai-icon">✨</span><span>Reply with AI</span>'
-    }
+    // Reset all buttons to normal state
+    const allMainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
+    allMainBtns.forEach(btn => {
+      btn.innerHTML = '<span class="ai-icon">✨</span><span>Reply with AI</span>'
+    })
   }
 }
 
@@ -492,10 +521,8 @@ function showToast(message: string, type: 'success' | 'error') {
 }
 
 function removeButton() {
-  if (inlineButton) {
-    inlineButton.remove()
-    inlineButton = null
-  }
+  inlineButtons.forEach(btn => btn.remove())
+  inlineButtons = []
   if (panelContainer) {
     panelContainer.remove()
     panelContainer = null
