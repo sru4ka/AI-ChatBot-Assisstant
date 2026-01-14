@@ -127,7 +127,8 @@ function queryWithFallback(selectors: string[], parent: Element | Document = doc
 /**
  * Try multiple selectors and return all matching elements
  */
-function queryAllWithFallback(selectors: string[], parent: Element | Document = document): Element[] {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _queryAllWithFallback(selectors: string[], parent: Element | Document = document): Element[] {
   const results: Element[] = []
   const seen = new Set<Element>()
 
