@@ -125,30 +125,6 @@ function queryWithFallback(selectors: string[], parent: Element | Document = doc
 }
 
 /**
- * Try multiple selectors and return all matching elements
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function _queryAllWithFallback(selectors: string[], parent: Element | Document = document): Element[] {
-  const results: Element[] = []
-  const seen = new Set<Element>()
-
-  for (const selector of selectors) {
-    try {
-      const elements = parent.querySelectorAll(selector)
-      elements.forEach(el => {
-        if (!seen.has(el)) {
-          seen.add(el)
-          results.push(el)
-        }
-      })
-    } catch (e) {
-      // Invalid selector, continue
-    }
-  }
-  return results
-}
-
-/**
  * Check if we're on a Freshdesk ticket page
  */
 export function isOnTicketPage(): boolean {
