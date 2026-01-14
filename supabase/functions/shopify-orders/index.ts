@@ -260,7 +260,7 @@ Deno.serve(async (req: Request) => {
           total: `${o.total_price} ${o.currency}`,
           date: o.created_at,
           trackingNumbers: o.tracking_numbers,
-          itemCount: o.line_items?.length || 0,
+          itemCount: o.line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0,
         })),
         formatted,
       }),
