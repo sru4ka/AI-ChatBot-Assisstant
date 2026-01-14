@@ -471,6 +471,190 @@ function cleanMessageText(text: string): string {
 }
 
 /**
+ * Clean message text but preserve some structure
+ */
+function cleanMessagePreserveStructure(text: string): string {
+  return text
+    .replace(/[ \t]+/g, ' ')  // Normalize spaces but not newlines
+    .replace(/^\s+|\s+$/gm, '')  // Trim each line
+    .replace(/\n{3,}/g, '\n\n')  // Max 2 newlines
+    .trim()
+}
+
+/**
+ * Get the full email chain/conversation from the ticket
+ * Returns messages in chronological order with sender labels
+ */
+export function getFullConversation(): string | null {
+  console.log('Freshdesk AI: Scanning for full email chain...')
+
+  const messages: Array<{ sender: 'customer' | 'agent' | 'unknown', text: string, timestamp?: string }> = []
+
+  // Patterns to identify metadata vs actual content
+  const metadataPatterns = [
+    /^Status:/i, /^Priority:/i, /^Type:/i, /^Group:/i, /^Agent:/i, /^Tags:/i,
+    /^To:/i, /^From:/i, /^CC:/i, /^Subject:/i,
+    /reported via email/i, /hours? ago/i, /minutes? ago/i, /days? ago/i,
+  ]
+
+  function isMetadata(text: string): boolean {
+    const trimmed = text.trim()
+    if (trimmed.length < 30) return true
+    return metadataPatterns.some(p => p.test(trimmed))
+  }
+
+  function isSubstantialContent(text: string): boolean {
+    const trimmed = text.trim()
+    if (trimmed.length < 40) return false
+    if (!/[.!?]/.test(trimmed)) return false
+    if (trimmed.split(/\s+/).length < 8) return false
+    return !isMetadata(trimmed)
+  }
+
+  // Strategy 1: Look for structured conversation threads
+  // Freshdesk often has .conversation-thread, .thread-item, etc.
+  const threadSelectors = [
+    '.conversation-thread .thread-item',
+    '.message-thread .message',
+    '[class*="conversation"] [class*="message"]',
+    '[class*="thread"] [class*="item"]',
+    '.ticket-conversation > div',
+    '.conv-container > div',
+  ]
+
+  for (const selector of threadSelectors) {
+    try {
+      const items = document.querySelectorAll(selector)
+      if (items.length > 0) {
+        items.forEach(item => {
+          const text = cleanMessagePreserveStructure(item.textContent || '')
+          if (isSubstantialContent(text)) {
+            // Try to determine if it's from customer or agent
+            const isCustomer = item.classList.contains('incoming') ||
+                               item.classList.contains('customer') ||
+                               item.classList.contains('requester') ||
+                               item.querySelector('[class*="incoming"], [class*="customer"]') !== null
+            const isAgent = item.classList.contains('outgoing') ||
+                            item.classList.contains('agent') ||
+                            item.querySelector('[class*="outgoing"], [class*="agent"]') !== null
+
+            messages.push({
+              sender: isCustomer ? 'customer' : (isAgent ? 'agent' : 'unknown'),
+              text: text.slice(0, 1500)
+            })
+          }
+        })
+
+        if (messages.length > 0) {
+          console.log(`Freshdesk AI: Found ${messages.length} messages via thread selector`)
+          break
+        }
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Strategy 2: Look for fr-view elements (Freshdesk's rich text display)
+  // These often contain the actual message bodies
+  if (messages.length === 0) {
+    const frViews = document.querySelectorAll('.fr-view')
+    frViews.forEach((frView, index) => {
+      const text = cleanMessagePreserveStructure(frView.textContent || '')
+      if (isSubstantialContent(text)) {
+        // Try to determine sender from parent context
+        const parent = frView.closest('[class*="message"], [class*="thread"], [class*="conv"]')
+        const isCustomer = parent?.classList.contains('incoming') ||
+                           parent?.classList.contains('customer') ||
+                           parent?.querySelector('[class*="incoming"]') !== null
+        const isAgent = parent?.classList.contains('outgoing') ||
+                        parent?.classList.contains('agent') ||
+                        parent?.querySelector('[class*="outgoing"]') !== null
+
+        messages.push({
+          sender: isCustomer ? 'customer' : (isAgent ? 'agent' : (index === 0 ? 'customer' : 'unknown')),
+          text: text.slice(0, 1500)
+        })
+      }
+    })
+
+    if (messages.length > 0) {
+      console.log(`Freshdesk AI: Found ${messages.length} messages via fr-view`)
+    }
+  }
+
+  // Strategy 3: Look for blockquotes (often used for quoted replies in email chains)
+  if (messages.length === 0) {
+    // First get the main message
+    const mainContent = document.querySelector('.ticket-description, .message-content, [class*="ticket-body"]')
+    if (mainContent) {
+      const mainText = cleanMessagePreserveStructure(mainContent.textContent || '')
+      if (isSubstantialContent(mainText)) {
+        messages.push({ sender: 'customer', text: mainText.slice(0, 1500) })
+      }
+    }
+
+    // Then look for quoted content
+    const blockquotes = document.querySelectorAll('blockquote, [class*="quoted"], [class*="reply-quote"]')
+    blockquotes.forEach(bq => {
+      const text = cleanMessagePreserveStructure(bq.textContent || '')
+      if (isSubstantialContent(text)) {
+        messages.push({ sender: 'agent', text: text.slice(0, 1500) })
+      }
+    })
+  }
+
+  // Strategy 4: Parse email chain from "On X wrote:" patterns
+  if (messages.length <= 1) {
+    const bodyText = document.body.textContent || ''
+    const emailChainPattern = /On\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[^:]+wrote:/gi
+    const parts = bodyText.split(emailChainPattern)
+
+    if (parts.length > 1) {
+      parts.forEach((part, index) => {
+        const cleaned = cleanMessagePreserveStructure(part)
+        if (isSubstantialContent(cleaned)) {
+          messages.push({
+            sender: index === 0 ? 'customer' : 'agent',
+            text: cleaned.slice(0, 1500)
+          })
+        }
+      })
+
+      if (messages.length > 1) {
+        console.log(`Freshdesk AI: Found ${messages.length} messages via email chain parsing`)
+      }
+    }
+  }
+
+  // If we have messages, format them as a conversation
+  if (messages.length > 0) {
+    // Remove duplicates (same text)
+    const seen = new Set<string>()
+    const uniqueMessages = messages.filter(m => {
+      const key = m.text.slice(0, 100)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+
+    // Format the conversation
+    const formatted = uniqueMessages.map((m, i) => {
+      const label = m.sender === 'customer' ? 'CUSTOMER' :
+                    m.sender === 'agent' ? 'AGENT' : `MESSAGE ${i + 1}`
+      return `[${label}]:\n${m.text}`
+    }).join('\n\n---\n\n')
+
+    console.log(`Freshdesk AI: Returning conversation with ${uniqueMessages.length} messages`)
+    return formatted.slice(0, 6000) // Allow longer for full chain
+  }
+
+  // Fallback: use the single message extraction
+  console.log('Freshdesk AI: No conversation found, falling back to single message')
+  return null
+}
+
+/**
  * Create and show a floating UI element for the extension
  */
 export function createFloatingButton(): HTMLElement {

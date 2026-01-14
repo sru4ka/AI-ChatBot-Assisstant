@@ -6,6 +6,7 @@
 import {
   isOnTicketPage,
   getLatestCustomerMessage,
+  getFullConversation,
   getTicketSubject,
   insertReply,
   removeFloatingButton,
@@ -375,8 +376,11 @@ async function handleGenerateReply() {
   if (insertBtn) insertBtn.disabled = true
 
   try {
-    // Auto-scan: Get ticket info
-    const customerMessage = getLatestCustomerMessage()
+    // Auto-scan: Get full conversation chain (or fall back to latest message)
+    let customerMessage = getFullConversation()
+    if (!customerMessage) {
+      customerMessage = getLatestCustomerMessage()
+    }
     if (!customerMessage) {
       throw new Error('Could not find customer message on this page')
     }
