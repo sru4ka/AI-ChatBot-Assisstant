@@ -95,6 +95,8 @@ INSTRUCTIONS:
 - Never make up information not in the knowledge base
 - Do not mention that you're using a knowledge base or AI
 - Write as if you are a real support agent replying to the customer
+- DO NOT include any signature, sign-off, name, or closing like "Best regards, [Name]" - the user will add their own signature
+- End your response with the last relevant sentence of your answer
 ${customPrompt ? `\nADDITIONAL INSTRUCTIONS FROM USER:\n${customPrompt}` : ''}
 
 KNOWLEDGE BASE:

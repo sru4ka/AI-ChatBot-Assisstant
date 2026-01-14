@@ -360,76 +360,147 @@ export function getTicketSubject(): string | null {
 export function insertReply(text: string): boolean {
   console.log('Freshdesk AI: Attempting to insert reply...')
 
-  // Helper to insert into an editor
+  // Helper to insert into an editor with proper HTML formatting
   function insertIntoEditor(editor: HTMLElement): boolean {
     editor.focus()
+
+    // Convert text to HTML with proper line breaks
+    const htmlContent = text
+      .split('\n')
+      .map(line => line.trim() === '' ? '<br>' : `<p>${line}</p>`)
+      .join('')
+
     // Clear existing content and insert new
-    editor.innerHTML = text.replace(/\n/g, '<br>')
+    editor.innerHTML = htmlContent
+
     // Trigger all possible events to notify Freshdesk of the change
-    editor.dispatchEvent(new Event('input', { bubbles: true }))
-    editor.dispatchEvent(new Event('change', { bubbles: true }))
-    editor.dispatchEvent(new Event('keyup', { bubbles: true }))
-    editor.dispatchEvent(new Event('blur', { bubbles: true }))
+    const events = ['input', 'change', 'keyup', 'keydown', 'keypress', 'blur', 'focus']
+    events.forEach(eventType => {
+      editor.dispatchEvent(new Event(eventType, { bubbles: true, cancelable: true }))
+    })
+
+    // Also dispatch InputEvent for modern editors
+    try {
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText' }))
+    } catch (e) {
+      // Fallback if InputEvent is not supported
+    }
+
+    console.log('Freshdesk AI: Successfully inserted into editor')
     return true
   }
 
   // Strategy 1: Look for Froala editor (very common in Freshdesk)
-  const froalaEditor = document.querySelector('.fr-element.fr-view') as HTMLElement
-  if (froalaEditor && froalaEditor.getAttribute('contenteditable') === 'true') {
-    console.log('Freshdesk AI: Found Froala editor')
-    return insertIntoEditor(froalaEditor)
+  // Try multiple Froala selectors
+  const froalaSelectors = [
+    '.fr-element.fr-view',
+    '.fr-element',
+    '.fr-box .fr-element',
+    'div.fr-wrapper div[contenteditable="true"]',
+  ]
+
+  for (const selector of froalaSelectors) {
+    const froalaEditor = document.querySelector(selector) as HTMLElement
+    if (froalaEditor && (froalaEditor.getAttribute('contenteditable') === 'true' || froalaEditor.isContentEditable)) {
+      console.log(`Freshdesk AI: Found Froala editor via ${selector}`)
+      return insertIntoEditor(froalaEditor)
+    }
   }
 
-  // Strategy 2: Look for any contenteditable in the reply area
-  const replyAreas = document.querySelectorAll('.reply-box, .reply-editor, [class*="reply"], [class*="editor-wrapper"]')
-  for (const area of replyAreas) {
-    const editor = area.querySelector('[contenteditable="true"]') as HTMLElement
-    if (editor) {
-      console.log('Freshdesk AI: Found contenteditable in reply area')
-      return insertIntoEditor(editor)
+  // Strategy 2: Look for editor inside reply-box or similar containers
+  const containerSelectors = [
+    '.reply-box',
+    '.reply-editor',
+    '.editor-container',
+    '.compose-area',
+    '[class*="reply-wrapper"]',
+    '[class*="editor-wrapper"]',
+    '[class*="compose"]',
+    '.ticket-reply',
+    '#reply-area',
+  ]
+
+  for (const containerSel of containerSelectors) {
+    const container = document.querySelector(containerSel)
+    if (container) {
+      const editor = container.querySelector('[contenteditable="true"]') as HTMLElement
+      if (editor) {
+        console.log(`Freshdesk AI: Found editor in ${containerSel}`)
+        return insertIntoEditor(editor)
+      }
     }
   }
 
   // Strategy 3: Try rich text editor from selectors
   const richEditor = queryWithFallback(SELECTORS.richTextEditor) as HTMLElement
-  if (richEditor && richEditor.getAttribute('contenteditable') === 'true') {
+  if (richEditor && (richEditor.getAttribute('contenteditable') === 'true' || richEditor.isContentEditable)) {
     console.log('Freshdesk AI: Found rich text editor via selector')
     return insertIntoEditor(richEditor)
   }
 
   // Strategy 4: Try regular textarea
-  const textarea = queryWithFallback(SELECTORS.replyTextArea) as HTMLTextAreaElement
-  if (textarea && textarea.tagName === 'TEXTAREA') {
-    console.log('Freshdesk AI: Found textarea')
-    textarea.focus()
-    textarea.value = text
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    textarea.dispatchEvent(new Event('change', { bubbles: true }))
-    return true
+  const textareaSelectors = [
+    'textarea[name*="reply"]',
+    'textarea[name*="body"]',
+    'textarea[name*="content"]',
+    '.reply-box textarea',
+    '#reply-textarea',
+    ...SELECTORS.replyTextArea,
+  ]
+
+  for (const sel of textareaSelectors) {
+    try {
+      const textarea = document.querySelector(sel) as HTMLTextAreaElement
+      if (textarea && textarea.tagName === 'TEXTAREA') {
+        console.log(`Freshdesk AI: Found textarea via ${sel}`)
+        textarea.focus()
+        textarea.value = text
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+        textarea.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }
+    } catch (e) {
+      // Continue
+    }
   }
 
-  // Strategy 5: Look for ANY contenteditable on the page that's visible
+  // Strategy 5: Look for ANY contenteditable that's visible and in a reasonable position
   const allEditable = document.querySelectorAll('[contenteditable="true"]')
   for (const el of allEditable) {
     const htmlEl = el as HTMLElement
-    // Check if it's visible and looks like a reply area
     const rect = htmlEl.getBoundingClientRect()
-    if (rect.width > 200 && rect.height > 50 && rect.bottom > 0) {
+    const style = window.getComputedStyle(htmlEl)
+
+    // Check if it's visible, reasonable size, and not hidden
+    const isVisible = rect.width > 100 &&
+                      rect.height > 30 &&
+                      rect.top < window.innerHeight &&
+                      rect.bottom > 0 &&
+                      style.display !== 'none' &&
+                      style.visibility !== 'hidden'
+
+    if (isVisible) {
       console.log('Freshdesk AI: Found visible contenteditable element')
       return insertIntoEditor(htmlEl)
     }
   }
 
-  // Strategy 6: Try clicking the Reply button first to open the reply area
-  const replyButtons = document.querySelectorAll('button[title*="Reply"], [class*="reply-btn"], a[title*="Reply"], button:contains("Reply"), [data-action="reply"]')
-  for (const btn of replyButtons) {
-    const htmlBtn = btn as HTMLElement
-    if (htmlBtn.offsetParent !== null) { // Check if visible
-      console.log('Freshdesk AI: Clicking reply button to open editor...')
-      htmlBtn.click()
-
-      // Return true - the popup should notify user to try again after clicking
-      return false
+  // Strategy 6: Look for iframe-based editors (TinyMCE, etc.)
+  const iframes = document.querySelectorAll('iframe[class*="editor"], iframe[id*="editor"], .tox-edit-area__iframe')
+  for (const iframe of iframes) {
+    try {
+      const iframeEl = iframe as HTMLIFrameElement
+      const iframeDoc = iframeEl.contentDocument || iframeEl.contentWindow?.document
+      if (iframeDoc) {
+        const body = iframeDoc.body
+        if (body && body.isContentEditable) {
+          console.log('Freshdesk AI: Found iframe editor')
+          body.innerHTML = text.replace(/\n/g, '<br>')
+          return true
+        }
+      }
+    } catch (e) {
+      // Cross-origin iframe, skip
     }
   }
 
