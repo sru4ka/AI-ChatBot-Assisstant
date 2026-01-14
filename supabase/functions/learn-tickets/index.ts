@@ -33,103 +33,50 @@ interface FreshdeskConversation {
  * Fetch RESOLVED and CLOSED tickets from Freshdesk API
  * Status 4 = Resolved, Status 5 = Closed
  *
- * Uses the standard tickets API with pagination (up to 300 pages = 30,000 tickets)
- * and filters locally for resolved/closed status
+ * PRIMARY: Uses Search API with updated_at sorting to get ALL resolved/closed tickets
+ * SECONDARY: Uses standard tickets API as supplement
  */
 async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
-  const perPage = 100
   const tickets: FreshdeskTicket[] = []
   const existingIds = new Set<number>()
 
   console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
-  // Primary Method: Scan ALL tickets with standard API and filter locally
-  // This is the most reliable method - the filter parameter doesn't accept 'closed'/'resolved'
-  // Freshdesk allows up to 300 pages (30,000 tickets total)
-  const maxPages = 300
-  let consecutiveEmptyPages = 0
-  let totalScanned = 0
+  // PRIMARY METHOD: Use Search API with different date ranges to get more tickets
+  // Search API returns max 30 per page, 10 pages per query (300 per query)
+  // We'll use multiple queries with different date ranges to get more
 
-  for (let page = 1; page <= maxPages && tickets.length < count; page++) {
-    try {
-      const response = await fetch(
-        `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
-        {
-          headers: {
-            'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
-            'Content-Type': 'application/json',
-          },
-        }
-      )
+  // First, search for resolved tickets (status 4) and closed tickets (status 5)
+  for (const status of [5, 4]) { // Closed first, then Resolved
+    if (tickets.length >= count) break
 
-      if (!response.ok) {
-        console.log(`Tickets API returned ${response.status} at page ${page}`)
-        // If we get a 403 or 404, we've likely hit the end
-        if (response.status === 403 || response.status === 404) break
-        // For other errors, try a few more times
-        consecutiveEmptyPages++
-        if (consecutiveEmptyPages >= 3) break
-        await new Promise(resolve => setTimeout(resolve, 500))
-        continue
-      }
+    console.log(`Searching for tickets with status ${status}...`)
 
-      const data = await response.json()
-      if (!data || data.length === 0) {
-        consecutiveEmptyPages++
-        if (consecutiveEmptyPages >= 2) {
-          console.log(`No more tickets at page ${page}, stopping`)
-          break
-        }
-        continue
-      }
+    // Try searching with different date ranges to get past the 300 limit
+    // We'll search by created_at in chunks
+    const dateRanges = [
+      '', // No date filter first (gets most recent 300)
+      "created_at:>'2024-01-01'",
+      "created_at:>'2023-01-01' AND created_at:<'2024-01-01'",
+      "created_at:>'2022-01-01' AND created_at:<'2023-01-01'",
+      "created_at:>'2021-01-01' AND created_at:<'2022-01-01'",
+      "created_at:<'2021-01-01'",
+    ]
 
-      consecutiveEmptyPages = 0
-      totalScanned += data.length
-
-      // Filter for resolved (4) or closed (5) tickets we don't already have
-      const newTickets = data.filter((t: FreshdeskTicket) =>
-        t.status >= 4 && !existingIds.has(t.id)
-      )
-
-      newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
-      tickets.push(...newTickets)
-
-      console.log(`Page ${page}: scanned ${data.length} tickets, found ${newTickets.length} resolved/closed (total: ${tickets.length})`)
-
-      // Rate limit - Freshdesk has API limits
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      // If we have enough tickets, stop
-      if (tickets.length >= count) {
-        console.log(`Reached target of ${count} tickets`)
-        break
-      }
-
-    } catch (err) {
-      console.error(`Error fetching page ${page}:`, err)
-      consecutiveEmptyPages++
-      if (consecutiveEmptyPages >= 3) break
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
-  }
-
-  console.log(`Scanned ${totalScanned} total tickets, found ${tickets.length} resolved/closed`)
-
-  // Fallback: If standard API didn't find enough, supplement with search API
-  // Search API is limited to 300 results per status but might catch some we missed
-  if (tickets.length < count) {
-    console.log('Supplementing with search API...')
-
-    for (const status of [5, 4]) { // Closed (5), Resolved (4)
+    for (const dateFilter of dateRanges) {
       if (tickets.length >= count) break
 
       let page = 1
-      const maxSearchPages = 10 // Freshdesk search limit
+      const maxSearchPages = 10
 
       while (page <= maxSearchPages && tickets.length < count) {
         try {
+          const query = dateFilter
+            ? `"status:${status} AND ${dateFilter}"`
+            : `"status:${status}"`
+
           const response = await fetch(
-            `https://${domain}/api/v2/search/tickets?query="status:${status}"&page=${page}`,
+            `https://${domain}/api/v2/search/tickets?query=${encodeURIComponent(query)}&page=${page}`,
             {
               headers: {
                 'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
@@ -153,15 +100,76 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
           newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
           tickets.push(...newTickets)
 
-          console.log(`Search found ${newTickets.length} additional tickets with status ${status} on page ${page}`)
+          console.log(`Search status:${status} ${dateFilter || '(recent)'} page ${page}: found ${newTickets.length} new tickets (total: ${tickets.length})`)
           page++
 
-          await new Promise(resolve => setTimeout(resolve, 150))
+          // Rate limit
+          await new Promise(resolve => setTimeout(resolve, 100))
 
         } catch (err) {
           console.error(`Error searching status ${status}:`, err)
           break
         }
+      }
+    }
+  }
+
+  console.log(`Search API found ${tickets.length} tickets`)
+
+  // SECONDARY METHOD: Supplement with standard tickets API
+  // This catches any tickets the search API might have missed
+  if (tickets.length < count) {
+    console.log('Supplementing with standard tickets API...')
+
+    const perPage = 100
+    const maxPages = Math.min(50, Math.ceil((count - tickets.length) * 2 / perPage)) // Don't scan too many pages
+    let consecutiveEmptyPages = 0
+
+    for (let page = 1; page <= maxPages && tickets.length < count; page++) {
+      try {
+        const response = await fetch(
+          `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
+          {
+            headers: {
+              'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+
+        if (!response.ok) {
+          if (response.status === 403 || response.status === 404) break
+          consecutiveEmptyPages++
+          if (consecutiveEmptyPages >= 3) break
+          continue
+        }
+
+        const data = await response.json()
+        if (!data || data.length === 0) {
+          consecutiveEmptyPages++
+          if (consecutiveEmptyPages >= 2) break
+          continue
+        }
+
+        consecutiveEmptyPages = 0
+
+        // Filter for resolved/closed tickets we don't already have
+        const newTickets = data.filter((t: FreshdeskTicket) =>
+          t.status >= 4 && !existingIds.has(t.id)
+        )
+
+        newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+        tickets.push(...newTickets)
+
+        if (newTickets.length > 0) {
+          console.log(`Standard API page ${page}: found ${newTickets.length} additional tickets (total: ${tickets.length})`)
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100))
+
+      } catch (err) {
+        console.error(`Error fetching page ${page}:`, err)
+        break
       }
     }
   }
