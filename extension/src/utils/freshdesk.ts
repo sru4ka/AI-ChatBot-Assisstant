@@ -162,7 +162,7 @@ export function isOnTicketPage(): boolean {
 export function getLatestCustomerMessage(): string | null {
   console.log('Freshdesk AI: Scanning for customer message...')
 
-  // Metadata patterns to filter out (these are NOT the actual message)
+  // Patterns that indicate metadata/UI text (NOT the actual message)
   const metadataPatterns = [
     /^New customer message on/i,
     /^\d{1,2}\/\d{1,2}\/\d{4}/,
@@ -172,130 +172,181 @@ export function getLatestCustomerMessage(): string | null {
     /^Group:/i,
     /^Agent:/i,
     /^Tags:/i,
+    /^Re:/i,
+    /^Order #\d+/i,
+    /reported via email/i,
+    /hours? ago/i,
+    /minutes? ago/i,
+    /days? ago/i,
+    /^\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i,
+    /^To:/i,
+    /^From:/i,
+    /^CC:/i,
+    /PM\s*$/i,
+    /AM\s*$/i,
+    /Status:\s*Open/i,
+    /Status:\s*Pending/i,
+    /Status:\s*Closed/i,
   ]
 
-  function isMetadata(text: string): boolean {
+  function isMetadataText(text: string): boolean {
     const trimmed = text.trim()
-    return metadataPatterns.some(p => p.test(trimmed)) ||
-      trimmed.length < 20 ||
-      /^\d+\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/i.test(trimmed) ||
-      /^#\d+\s+\d+/.test(trimmed)
+    if (trimmed.length < 30) return true
+    return metadataPatterns.some(p => p.test(trimmed))
   }
 
-  // First, try to find the conversation area
-  let conversationArea = queryWithFallback(SELECTORS.ticketConversation)
-
-  if (!conversationArea) {
-    console.log('Freshdesk AI: No conversation area found, using document body')
-    conversationArea = document.body
+  function isActualMessageContent(text: string): boolean {
+    const trimmed = text.trim()
+    // Must be substantial
+    if (trimmed.length < 50) return false
+    // Should contain sentence-like patterns
+    if (!/[.!?]/.test(trimmed)) return false
+    // Should have multiple words
+    if (trimmed.split(/\s+/).length < 10) return false
+    // Should not be metadata
+    if (isMetadataText(trimmed)) return false
+    return true
   }
 
-  // Strategy 1: Look for Freshdesk's fr-view class (Froala editor view - common for message display)
-  const frViews = conversationArea.querySelectorAll('.fr-view')
-  for (const frView of frViews) {
-    const text = cleanMessageText(frView.textContent || '')
-    if (text.length > 30 && !isMetadata(text)) {
-      console.log('Freshdesk AI: Found message via fr-view')
-      return text
-    }
-  }
-
-  // Strategy 2: Look for specific customer message elements
-  const customerMessages = queryAllWithFallback(SELECTORS.customerMessage, conversationArea)
-  console.log(`Freshdesk AI: Found ${customerMessages.length} potential customer messages`)
-
-  if (customerMessages.length > 0) {
-    // Try to get content from the most recent customer message
-    const latestMessage = customerMessages[customerMessages.length - 1]
-    const content = queryWithFallback(SELECTORS.messageContent, latestMessage)
-    if (content && content.textContent) {
-      const text = cleanMessageText(content.textContent)
-      if (text.length > 20 && !isMetadata(text)) {
-        console.log('Freshdesk AI: Found message via customer message selector')
-        return text
-      }
-    }
-    // Fallback to the full element text
-    const msgText = cleanMessageText(latestMessage.textContent || '')
-    if (msgText.length > 20 && !isMetadata(msgText)) {
-      console.log('Freshdesk AI: Found message via customer message element text')
-      return msgText
-    }
-  }
-
-  // Strategy 3: Look for message content elements directly
-  const messageContents = queryAllWithFallback(SELECTORS.messageContent, conversationArea)
-  console.log(`Freshdesk AI: Found ${messageContents.length} message content elements`)
-
-  if (messageContents.length > 0) {
-    // Get the first substantial message (likely the customer's initial message)
-    for (const msgEl of messageContents) {
-      const text = cleanMessageText(msgEl.textContent || '')
-      if (text.length > 30 && !isMetadata(text)) {
-        console.log('Freshdesk AI: Found message via content selector')
-        return text
-      }
-    }
-  }
-
-  // Strategy 4: Look for blockquote or email-like content
-  const emailSelectors = 'blockquote, .email-content, .ticket-description, .email-body, [class*="body"], [class*="content"]'
-  const emailElements = conversationArea.querySelectorAll(emailSelectors)
-  for (const el of emailElements) {
-    const text = cleanMessageText(el.textContent || '')
-    if (text.length > 50 && !isMetadata(text)) {
-      console.log('Freshdesk AI: Found message via email/blockquote selector')
-      return text
-    }
-  }
-
-  // Strategy 5: Look for common text patterns in the page
-  const patterns = [
-    /Comment:\s*([\s\S]+?)(?=\n\n|Tags:|$)/i,
-    /Description:\s*([\s\S]+?)(?=\n\n|$)/i,
-    /Message:\s*([\s\S]+?)(?=\n\n|$)/i,
+  // Strategy 1: Look for the email body content specifically
+  // Freshdesk displays emails in specific containers
+  const emailBodySelectors = [
+    '.ticket-message-content',
+    '.message-content',
+    '.email-body',
+    '.ticket-description',
+    '.conversation-body',
+    '.msg-body',
+    '[class*="message-body"]',
+    '[class*="email-content"]',
+    '[class*="ticket-body"]',
   ]
 
-  const pageText = conversationArea.textContent || ''
-  for (const pattern of patterns) {
-    const match = pageText.match(pattern)
-    if (match && match[1] && match[1].trim().length > 20 && !isMetadata(match[1])) {
-      console.log('Freshdesk AI: Found message via text pattern matching')
-      return cleanMessageText(match[1])
+  for (const selector of emailBodySelectors) {
+    try {
+      const elements = document.querySelectorAll(selector)
+      for (const el of elements) {
+        const text = cleanMessageText(el.textContent || '')
+        if (isActualMessageContent(text)) {
+          console.log(`Freshdesk AI: Found message via ${selector}`)
+          return text.slice(0, 2000)
+        }
+      }
+    } catch (e) {
+      // Continue
     }
   }
 
-  // Strategy 6: Get substantial text from the main content area
-  // Find divs with substantial text content
-  const allDivs = conversationArea.querySelectorAll('div, p, td, span')
-  const substantialTexts: string[] = []
+  // Strategy 2: Look for paragraphs that look like email content
+  // Real email messages typically have greeting + content + signature pattern
+  const allParagraphs = document.querySelectorAll('p, div')
+  const contentBlocks: string[] = []
 
-  // UI text patterns to exclude
-  const uiPatterns = ['Reply', 'Forward', 'Delete', 'Close', 'Add note', 'RESOLUTION DUE',
-    'Pending', 'Open', 'Resolved', 'Closed', 'Priority', 'Status', 'Type', 'Group', 'Agent']
-
-  allDivs.forEach(div => {
-    const text = cleanMessageText(div.textContent || '')
-    // Look for text that seems like a customer message (not UI text)
-    if (text.length > 50 &&
-        !isMetadata(text) &&
-        !uiPatterns.some(p => text.startsWith(p))) {
-      substantialTexts.push(text)
+  allParagraphs.forEach(el => {
+    const text = cleanMessageText(el.textContent || '')
+    // Look for content that starts with a greeting or has email patterns
+    if (text.length > 100 && (
+      /^(hi|hello|dear|greetings|good\s+(morning|afternoon|evening))/i.test(text) ||
+      /thank\s*(you|s)/i.test(text) ||
+      /@[a-z0-9.-]+\.[a-z]{2,}/i.test(text) || // Contains email
+      /sent from my (iphone|android|mobile)/i.test(text)
+    )) {
+      if (!isMetadataText(text)) {
+        contentBlocks.push(text)
+      }
     }
   })
 
-  // Sort by length and get the most substantial one that looks like actual content
-  if (substantialTexts.length > 0) {
-    substantialTexts.sort((a, b) => b.length - a.length)
-    console.log('Freshdesk AI: Found message via substantial text search')
-    return substantialTexts[0].slice(0, 2000)
+  if (contentBlocks.length > 0) {
+    // Get the longest content block (likely the main message)
+    contentBlocks.sort((a, b) => b.length - a.length)
+    console.log('Freshdesk AI: Found message via paragraph scan')
+    return contentBlocks[0].slice(0, 2000)
   }
 
-  // Last resort: just get all text from conversation area
-  const allText = cleanMessageText(pageText)
-  if (allText.length > 50) {
-    console.log('Freshdesk AI: Using fallback full text')
-    return allText.slice(0, 1500)
+  // Strategy 3: Look for fr-view elements (Freshdesk's rich text display)
+  const frViews = document.querySelectorAll('.fr-view')
+  for (const frView of frViews) {
+    const text = cleanMessageText(frView.textContent || '')
+    if (isActualMessageContent(text)) {
+      console.log('Freshdesk AI: Found message via fr-view')
+      return text.slice(0, 2000)
+    }
+  }
+
+  // Strategy 4: Look for the main ticket content area
+  const mainContentSelectors = [
+    '.ticket-details',
+    '.ticket-content',
+    '.conversation-container',
+    '[class*="ticket-detail"]',
+    'article',
+  ]
+
+  for (const selector of mainContentSelectors) {
+    try {
+      const container = document.querySelector(selector)
+      if (container) {
+        // Look for substantial text within this container
+        const innerElements = container.querySelectorAll('div, p, span, td')
+        for (const el of innerElements) {
+          const text = cleanMessageText(el.textContent || '')
+          if (isActualMessageContent(text)) {
+            console.log(`Freshdesk AI: Found message in ${selector}`)
+            return text.slice(0, 2000)
+          }
+        }
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Strategy 5: Scan all text nodes and find the most message-like content
+  const allElements = document.querySelectorAll('div, p, td, span, article')
+  let bestMessage = ''
+  let bestScore = 0
+
+  allElements.forEach(el => {
+    const text = cleanMessageText(el.textContent || '')
+    if (text.length < 50 || text.length > 5000) return
+    if (isMetadataText(text)) return
+
+    // Score the text based on how "message-like" it is
+    let score = 0
+    if (/^(hi|hello|dear|greetings)/i.test(text)) score += 20
+    if (/thank\s*(you|s)/i.test(text)) score += 10
+    if (/@[a-z0-9.-]+\.[a-z]{2,}/i.test(text)) score += 10
+    if (/[.!?]/.test(text)) score += 5
+    if (text.split(/\s+/).length > 20) score += 10
+    if (text.length > 200) score += 10
+    if (/sent from my/i.test(text)) score += 15
+    // Penalize text with too much metadata
+    if (/Status:|Priority:|Type:|Group:/i.test(text)) score -= 50
+
+    if (score > bestScore) {
+      bestScore = score
+      bestMessage = text
+    }
+  })
+
+  if (bestScore > 10 && bestMessage.length > 50) {
+    console.log('Freshdesk AI: Found message via scoring')
+    return bestMessage.slice(0, 2000)
+  }
+
+  // Last resort: get longest text block
+  let longestText = ''
+  allElements.forEach(el => {
+    const text = cleanMessageText(el.textContent || '')
+    if (text.length > longestText.length && text.length < 3000 && !isMetadataText(text)) {
+      longestText = text
+    }
+  })
+
+  if (longestText.length > 100) {
+    console.log('Freshdesk AI: Using longest text as fallback')
+    return longestText.slice(0, 2000)
   }
 
   console.log('Freshdesk AI: No customer message found')
