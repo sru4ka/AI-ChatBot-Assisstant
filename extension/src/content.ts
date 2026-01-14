@@ -389,9 +389,19 @@ async function handleGenerateReply() {
     const settings = await chrome.storage.local.get(['freshdeskAiSettings'])
     const signature = settings.freshdeskAiSettings?.signature || ''
 
-    // Get auth session
+    // Get auth session - Supabase stores as JSON string, need to parse
     const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-    const authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+    let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+
+    // Parse if it's a string (Supabase stores session as JSON string)
+    if (typeof authData === 'string') {
+      try {
+        authData = JSON.parse(authData)
+      } catch (e) {
+        console.error('Failed to parse auth data:', e)
+        authData = null
+      }
+    }
 
     if (!authData?.access_token) {
       throw new Error('Please log in via the extension popup first')
