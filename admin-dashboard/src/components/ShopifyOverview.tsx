@@ -40,6 +40,11 @@ export default function ShopifyOverview({
   const [result, setResult] = useState<OrderLookupResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // AI Q&A state
+  const [question, setQuestion] = useState('')
+  const [aiResponse, setAiResponse] = useState('')
+  const [askingAi, setAskingAi] = useState(false)
+
   const isConnected = shopifyDomain && shopifyAccessToken
 
   async function handleLookup(e: React.FormEvent) {
@@ -49,6 +54,8 @@ export default function ShopifyOverview({
     setLoading(true)
     setError(null)
     setResult(null)
+    setAiResponse('')
+    setQuestion('')
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke('shopify-orders', {
@@ -71,6 +78,44 @@ export default function ShopifyOverview({
       setError(err instanceof Error ? err.message : 'Failed to lookup order')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleAskAI(e: React.FormEvent) {
+    e.preventDefault()
+    if (!question.trim() || !result?.formatted) return
+
+    setAskingAi(true)
+    setAiResponse('')
+
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke('generate-reply', {
+        body: {
+          businessId,
+          customerMessage: question.trim(),
+          tone: 'professional',
+          customPrompt: `You are answering a question about a Shopify order. Use ONLY the following order information to answer. Be specific and helpful.
+
+ORDER INFORMATION:
+${result.formatted}
+
+Answer the question directly and concisely based on this order data. If the information requested is not in the order data, say so.`,
+        },
+      })
+
+      if (fnError) {
+        throw new Error(fnError.message)
+      }
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      setAiResponse(data.reply)
+    } catch (err) {
+      setAiResponse(`Error: ${err instanceof Error ? err.message : 'Failed to get AI response'}`)
+    } finally {
+      setAskingAi(false)
     }
   }
 
@@ -166,7 +211,7 @@ export default function ShopifyOverview({
         }}
       >
         <h5 style={{ margin: '0 0 0.75rem', color: '#166534', fontSize: '0.9rem' }}>
-          Test Order Lookup
+          Order Lookup & AI Q&A
         </h5>
         <form onSubmit={handleLookup} style={{ display: 'flex', gap: '0.5rem' }}>
           <input
@@ -270,6 +315,75 @@ export default function ShopifyOverview({
                     )}
                   </div>
                 ))}
+
+                {/* AI Q&A Section */}
+                <div
+                  style={{
+                    marginTop: '1rem',
+                    paddingTop: '1rem',
+                    borderTop: '1px solid #d1fae5',
+                  }}
+                >
+                  <p style={{ margin: '0 0 0.5rem', color: '#166534', fontWeight: '500', fontSize: '0.85rem' }}>
+                    🤖 Ask AI about this order
+                  </p>
+                  <form onSubmit={handleAskAI} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      placeholder="e.g., What items were ordered? Is it shipped?"
+                      style={{
+                        flex: 1,
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        border: '1px solid #d1fae5',
+                        fontSize: '0.85rem',
+                        background: '#fff',
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={askingAi || !question.trim()}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        color: '#fff',
+                        fontSize: '0.8rem',
+                        fontWeight: '500',
+                        cursor: askingAi ? 'not-allowed' : 'pointer',
+                        opacity: askingAi || !question.trim() ? 0.6 : 1,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {askingAi ? 'Asking...' : 'Ask'}
+                    </button>
+                  </form>
+
+                  {/* AI Response */}
+                  {aiResponse && (
+                    <div
+                      style={{
+                        marginTop: '0.75rem',
+                        padding: '0.75rem',
+                        background: '#f5f3ff',
+                        borderRadius: '6px',
+                        border: '1px solid #ddd6fe',
+                        fontSize: '0.85rem',
+                        color: '#374151',
+                        lineHeight: '1.5',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '1rem' }}>🤖</span>
+                        <strong style={{ color: '#5b21b6', fontSize: '0.8rem' }}>AI Response</strong>
+                      </div>
+                      {aiResponse}
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -282,7 +396,7 @@ export default function ShopifyOverview({
             color: '#166534',
           }}
         >
-          AI can use order data when generating replies to customer inquiries.
+          Look up orders and ask AI questions about order details, shipping, items, etc.
         </p>
       </div>
     </div>
