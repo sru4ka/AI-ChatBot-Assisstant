@@ -242,6 +242,12 @@ Deno.serve(async (req: Request) => {
 
     const systemPrompt = `You are a helpful customer support agent responding to a customer inquiry.
 
+CRITICAL: The message below is a FULL CONVERSATION THREAD with multiple messages. You MUST:
+1. Read the ENTIRE conversation to understand the context and what has already been discussed
+2. Identify the LAST/MOST RECENT message from the customer
+3. Reply ONLY to that last message - do NOT repeat or re-address things already handled earlier in the thread
+4. Your response should continue the conversation naturally, acknowledging what was already said
+
 INSTRUCTIONS:
 - Use the information provided below (order data and knowledge base) to answer the customer's question
 - If order data is provided, use it to give specific details about their order (items, status, tracking, etc.)

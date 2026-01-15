@@ -724,15 +724,22 @@ export function getFullConversation(): string | null {
       return true
     })
 
-    // Format the conversation
+    // Format the conversation with clear numbering and indication of which is LAST
+    const totalMsgs = uniqueMessages.length
     const formatted = uniqueMessages.map((m, i) => {
+      const msgNum = i + 1
+      const isLast = msgNum === totalMsgs
       const label = m.sender === 'customer' ? 'CUSTOMER' :
-                    m.sender === 'agent' ? 'AGENT' : `MESSAGE ${i + 1}`
-      return `[${label}]:\n${m.text}`
+                    m.sender === 'agent' ? 'AGENT (our previous reply)' : `MESSAGE`
+      const lastIndicator = isLast ? ' <<<< THIS IS THE LATEST MESSAGE - REPLY TO THIS ONE' : ''
+      return `[${label} - Message ${msgNum} of ${totalMsgs}${lastIndicator}]:\n${m.text}`
     }).join('\n\n---\n\n')
 
+    const header = `=== CONVERSATION THREAD (${totalMsgs} messages, oldest to newest) ===\n\n`
+    const footer = `\n\n=== END OF CONVERSATION - REPLY TO MESSAGE ${totalMsgs} ABOVE ===`
+
     console.log(`Freshdesk AI: Returning conversation with ${uniqueMessages.length} messages`)
-    return formatted.slice(0, 6000) // Allow longer for full chain
+    return (header + formatted + footer).slice(0, 6000) // Allow longer for full chain
   }
 
   // Fallback: use the single message extraction
