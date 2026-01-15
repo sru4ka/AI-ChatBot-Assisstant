@@ -269,9 +269,13 @@ function createPanel() {
       <div id="freshdesk-ai-content" class="panel-content">
         <div class="panel-loading"><span class="spinner"></span> Analyzing ticket...</div>
       </div>
+      <div class="panel-regenerate">
+        <input type="text" id="freshdesk-ai-regen-input" placeholder="Add instructions for regeneration (e.g., 'be more apologetic', 'mention refund policy')..." />
+        <button id="freshdesk-ai-regenerate" class="panel-btn panel-btn-regen" disabled>🔄 Regenerate</button>
+      </div>
       <div class="panel-actions">
         <button id="freshdesk-ai-copy" class="panel-btn panel-btn-secondary" disabled>Copy</button>
-        <button id="freshdesk-ai-insert" class="panel-btn panel-btn-primary" disabled>Insert Reply</button>
+        <button id="freshdesk-ai-insert" class="panel-btn panel-btn-primary" disabled>Insert & Learn</button>
       </div>
     </div>
   `
@@ -287,6 +291,8 @@ function setupEventListeners() {
   const insertBtn = document.getElementById('freshdesk-ai-insert')
   const saveSettingsBtn = document.getElementById('freshdesk-ai-save-settings')
   const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
+  const regenerateBtn = document.getElementById('freshdesk-ai-regenerate')
+  const regenInput = document.getElementById('freshdesk-ai-regen-input') as HTMLInputElement
 
   // Add event listeners to all main buttons (there may be multiple)
   const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
@@ -320,8 +326,15 @@ function setupEventListeners() {
   // Copy button
   copyBtn?.addEventListener('click', handleCopyReply)
 
-  // Insert button
+  // Insert button (now also learns)
   insertBtn?.addEventListener('click', handleInsertGeneratedReply)
+
+  // Regenerate button
+  regenerateBtn?.addEventListener('click', async () => {
+    const oneTimeInstructions = regenInput?.value || ''
+    await handleGenerateReply(oneTimeInstructions)
+    if (regenInput) regenInput.value = '' // Clear after use
+  })
 
   // Tone buttons
   const toneBtns = panelContainer?.querySelectorAll('.dropdown-tone-btn')
@@ -399,13 +412,17 @@ async function saveButtonSettings() {
   }
 }
 
-async function handleGenerateReply() {
+// Store the current conversation for regeneration
+let currentConversation = ''
+
+async function handleGenerateReply(oneTimeInstructions = '') {
   if (isGenerating) return
 
   const resultPanel = document.getElementById('freshdesk-ai-result-panel')
   const content = document.getElementById('freshdesk-ai-content')
   const copyBtn = document.getElementById('freshdesk-ai-copy') as HTMLButtonElement
   const insertBtn = document.getElementById('freshdesk-ai-insert') as HTMLButtonElement
+  const regenerateBtn = document.getElementById('freshdesk-ai-regenerate') as HTMLButtonElement
   const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
 
   if (!resultPanel || !content || !panelContainer) return
@@ -423,14 +440,19 @@ async function handleGenerateReply() {
 
   if (copyBtn) copyBtn.disabled = true
   if (insertBtn) insertBtn.disabled = true
+  if (regenerateBtn) regenerateBtn.disabled = true
 
   try {
     // Auto-scan: Get full conversation chain (or fall back to latest message)
-    let customerMessage = getFullConversation()
-    if (!customerMessage) {
-      customerMessage = getLatestCustomerMessage()
+    // Only re-scan if we don't have a conversation yet (first generation)
+    if (!currentConversation || !oneTimeInstructions) {
+      currentConversation = getFullConversation() || ''
+      if (!currentConversation) {
+        currentConversation = getLatestCustomerMessage() || ''
+      }
     }
-    if (!customerMessage) {
+
+    if (!currentConversation) {
       throw new Error('Could not find customer message on this page')
     }
 
@@ -466,9 +488,10 @@ async function handleGenerateReply() {
       },
       body: JSON.stringify({
         businessId: authData.user?.id,
-        customerMessage,
+        customerMessage: currentConversation,
         tone: currentTone,
         customPrompt: currentCustomPrompt || undefined,
+        oneTimeInstructions: oneTimeInstructions || undefined, // For regeneration guidance
       }),
     })
 
@@ -485,8 +508,9 @@ async function handleGenerateReply() {
 
     if (copyBtn) copyBtn.disabled = false
     if (insertBtn) insertBtn.disabled = false
+    if (regenerateBtn) regenerateBtn.disabled = false
 
-    showToast('Reply generated!', 'success')
+    showToast(oneTimeInstructions ? 'Reply regenerated!' : 'Reply generated!', 'success')
   } catch (error) {
     console.error('Error generating reply:', error)
     content.innerHTML = `<div class="panel-error">Error: ${error instanceof Error ? error.message : 'Failed to generate reply'}</div>`
@@ -511,15 +535,24 @@ function handleCopyReply() {
   })
 }
 
-function handleInsertGeneratedReply() {
+async function handleInsertGeneratedReply() {
   if (!generatedReply) return
 
   const success = insertReply(generatedReply)
   if (success) {
-    showToast('Reply inserted!', 'success')
+    showToast('Reply inserted! Learning...', 'success')
     const resultPanel = document.getElementById('freshdesk-ai-result-panel')
     resultPanel?.classList.add('hidden')
     panelContainer?.classList.add('hidden')
+
+    // Auto-learn: Save this Q&A pair to knowledge base
+    try {
+      await saveToKnowledgeBase(currentConversation, generatedReply)
+      console.log('Freshdesk AI: Saved reply to knowledge base')
+    } catch (err) {
+      console.error('Freshdesk AI: Failed to save to knowledge base:', err)
+      // Don't show error toast - learning is a background task
+    }
   } else {
     // Fallback: copy to clipboard
     navigator.clipboard.writeText(generatedReply).then(() => {
@@ -528,6 +561,38 @@ function handleInsertGeneratedReply() {
       showToast('Could not insert - please copy manually', 'error')
     })
   }
+}
+
+// Save Q&A pair to knowledge base for learning
+async function saveToKnowledgeBase(question: string, answer: string) {
+  // Get auth session
+  const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+  let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+
+  if (typeof authData === 'string') {
+    try {
+      authData = JSON.parse(authData)
+    } catch (e) {
+      return
+    }
+  }
+
+  if (!authData?.access_token) return
+
+  // Call the learn-reply endpoint
+  await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/learn-reply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authData.access_token}`,
+      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+    },
+    body: JSON.stringify({
+      businessId: authData.user?.id,
+      question,
+      answer,
+    }),
+  })
 }
 
 function showToast(message: string, type: 'success' | 'error') {

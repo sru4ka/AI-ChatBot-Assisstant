@@ -12,6 +12,7 @@ interface RequestBody {
   customerMessage: string
   tone?: 'professional' | 'friendly' | 'concise'
   customPrompt?: string
+  oneTimeInstructions?: string // For regeneration guidance
 }
 
 interface ChunkResult {
@@ -161,7 +162,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { businessId, customerMessage, tone = 'professional', customPrompt }: RequestBody = await req.json()
+    const { businessId, customerMessage, tone = 'professional', customPrompt, oneTimeInstructions }: RequestBody = await req.json()
 
     // Validate required fields
     if (!businessId || !customerMessage) {
@@ -240,6 +241,19 @@ Deno.serve(async (req: Request) => {
       concise: 'Be brief and to the point. Provide only essential information.',
     }
 
+    // Build instruction sections
+    let additionalInstructions = ''
+
+    // One-time instructions for regeneration (highest priority)
+    if (oneTimeInstructions) {
+      additionalInstructions += `\n⚠️ REGENERATION REQUEST - FOLLOW THESE SPECIFIC INSTRUCTIONS:\n${oneTimeInstructions}\n`
+    }
+
+    // Custom business instructions (only use when relevant to the query)
+    if (customPrompt) {
+      additionalInstructions += `\nBUSINESS-SPECIFIC INFO (use ONLY if relevant to this specific question):\n${customPrompt}\n`
+    }
+
     const systemPrompt = `You are a helpful customer support agent responding to a customer inquiry.
 
 CRITICAL: The message below is a FULL CONVERSATION THREAD with multiple messages. You MUST:
@@ -259,7 +273,7 @@ INSTRUCTIONS:
 - Write as if you are a real support agent replying to the customer
 - DO NOT include any signature, sign-off, name, or closing like "Best regards, [Name]" - the user will add their own signature
 - End your response with the last relevant sentence of your answer
-${customPrompt ? `\nADDITIONAL INSTRUCTIONS FROM USER:\n${customPrompt}` : ''}
+${additionalInstructions}
 ${orderContext ? `
 SHOPIFY ORDER DATA:
 ${orderContext}

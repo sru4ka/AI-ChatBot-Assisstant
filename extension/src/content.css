@@ -306,6 +306,47 @@
   border: 1px solid #fecaca;
 }
 
+/* Regenerate section */
+.panel-regenerate {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #fafafa;
+  border-top: 1px solid #e9ecef;
+}
+
+.panel-regenerate input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.panel-regenerate input:focus {
+  outline: none;
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
+}
+
+.panel-regenerate input::placeholder {
+  color: #9ca3af;
+}
+
+.panel-btn-regen {
+  background: #7c3aed;
+  color: white;
+  padding: 8px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.panel-btn-regen:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
 .panel-actions {
   display: flex;
   gap: 10px;
