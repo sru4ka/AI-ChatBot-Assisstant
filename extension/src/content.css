@@ -883,6 +883,14 @@
   height: 10px;
 }
 
+.timeline-empty {
+  padding: 12px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 11px;
+  font-style: italic;
+}
+
 /* Tracking Details */
 .tracking-details {
   margin-top: 8px;

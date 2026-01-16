@@ -1082,24 +1082,22 @@ async function handleSearchOrders() {
             `).join('')}
           </div>
         ` : ''}
-        ${order.events && order.events.length > 0 ? `
-          <details class="order-timeline">
-            <summary class="order-timeline-title">Timeline (${order.events.length} events)</summary>
-            <div class="timeline-events">
-              ${order.events.slice(0, 15).map((event: { created_at: string; message: string; verb: string; body: string | null; author: string | null }) => `
-                <div class="timeline-event ${event.verb === 'comment' || event.verb === 'note_added' || event.body ? 'comment' : ''} ${event.verb === 'fulfillment_success' ? 'fulfillment' : ''}">
-                  <div class="timeline-dot"></div>
-                  <div class="timeline-content">
-                    <div class="timeline-message">${event.message}</div>
-                    ${event.author ? `<div class="timeline-author">by ${event.author}</div>` : ''}
-                    ${event.body ? `<div class="timeline-comment">${event.body}</div>` : ''}
-                    <div class="timeline-date">${new Date(event.created_at).toLocaleString()}</div>
-                  </div>
+        <details class="order-timeline" open>
+          <summary class="order-timeline-title">Timeline ${order.events && order.events.length > 0 ? `(${order.events.length} events)` : ''}</summary>
+          <div class="timeline-events">
+            ${order.events && order.events.length > 0 ? order.events.slice(0, 15).map((event: { created_at: string; message: string; verb: string; body: string | null; author: string | null }) => `
+              <div class="timeline-event ${event.verb === 'comment' || event.verb === 'note_added' || event.body ? 'comment' : ''} ${event.verb === 'fulfillment_success' ? 'fulfillment' : ''}">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <div class="timeline-message">${event.message}</div>
+                  ${event.author ? `<div class="timeline-author">by ${event.author}</div>` : ''}
+                  ${event.body ? `<div class="timeline-comment">${event.body}</div>` : ''}
+                  <div class="timeline-date">${new Date(event.created_at).toLocaleString()}</div>
                 </div>
-              `).join('')}
-            </div>
-          </details>
-        ` : ''}
+              </div>
+            `).join('') : '<div class="timeline-empty">No timeline events found. Check Supabase logs for details.</div>'}
+          </div>
+        </details>
         <div class="order-actions">
           <a href="${order.adminUrl}" target="_blank" class="order-link-btn">View in Shopify</a>
         </div>
