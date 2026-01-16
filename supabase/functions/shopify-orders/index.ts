@@ -68,7 +68,7 @@ async function searchOrders(
   storeDomain: string,
   accessToken: string,
   query: string,
-  apiVersion = '2024-01'
+  apiVersion = '2024-10'
 ): Promise<ShopifyOrder[]> {
   // Try different search strategies
   const searches: string[] = []
@@ -161,7 +161,10 @@ async function searchOrders(
             const graphqlQuery = `
               query getOrderTimeline($id: ID!) {
                 order(id: $id) {
-                  events(first: 30, sortKey: CREATED_AT, reverse: true) {
+                  id
+                  note
+                  hasTimelineComment
+                  events(first: 50, sortKey: CREATED_AT, reverse: true) {
                     edges {
                       node {
                         __typename
@@ -173,9 +176,17 @@ async function searchOrders(
                         criticalAlert
                         ... on CommentEvent {
                           rawMessage
+                          attachments {
+                            id
+                            name
+                            url
+                          }
                           author {
                             name
                           }
+                          canDelete
+                          canEdit
+                          edited
                         }
                         ... on BasicEvent {
                           appTitle
@@ -204,21 +215,33 @@ async function searchOrders(
               console.log('GraphQL response for order', order.id, ':', JSON.stringify(graphqlData))
 
               if (graphqlData.errors) {
-                console.warn('GraphQL errors:', graphqlData.errors)
+                console.warn('GraphQL errors:', JSON.stringify(graphqlData.errors))
               }
 
+              // Check if order has timeline comments
+              const hasComments = graphqlData.data?.order?.hasTimelineComment
+              console.log('Order has timeline comments:', hasComments)
+
               const timelineEvents = graphqlData.data?.order?.events?.edges || []
-              events = timelineEvents.map((edge: { node: { __typename: string; id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string }; attributeToUser?: boolean } }) => ({
-                id: edge.node.id,
-                created_at: edge.node.createdAt,
-                message: edge.node.message,
-                subject_type: 'Order',
-                verb: edge.node.__typename === 'CommentEvent' ? 'comment' : 'event',
-                author: edge.node.author?.name || null,
-                body: edge.node.rawMessage || null,
-              }))
+              console.log('Total timeline events:', timelineEvents.length)
+
+              events = timelineEvents.map((edge: { node: { __typename: string; id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string }; attributeToUser?: boolean } }) => {
+                const isComment = edge.node.__typename === 'CommentEvent'
+                console.log('Event type:', edge.node.__typename, 'isComment:', isComment, 'message:', edge.node.message?.substring(0, 50))
+                return {
+                  id: edge.node.id,
+                  created_at: edge.node.createdAt,
+                  message: edge.node.message,
+                  subject_type: 'Order',
+                  verb: isComment ? 'comment' : 'event',
+                  author: edge.node.author?.name || null,
+                  body: edge.node.rawMessage || null,
+                }
+              })
 
               console.log('Parsed events:', events.length, 'comments:', events.filter((e: ShopifyEvent) => e.verb === 'comment').length)
+            } else {
+              console.warn('GraphQL response not ok:', graphqlResponse.status, await graphqlResponse.text())
             }
           } catch (e) {
             console.warn('Error fetching timeline events:', e)
