@@ -41,24 +41,95 @@ function isTimeRunningOut(): boolean {
 }
 
 /**
- * Fetch resolved/closed tickets - ULTRA FAST with high parallelism
+ * Fetch RESOLVED and CLOSED tickets using Search API (more efficient)
+ * Status 4 = Resolved, Status 5 = Closed
  */
-async function fetchTicketsFast(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
+async function fetchTickets(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
   const tickets: FreshdeskTicket[] = []
   const existingIds = new Set<number>()
-  const perPage = 100
-  const maxPages = Math.ceil(count * 2 / perPage)
 
-  console.log(`Fetching up to ${count} tickets with high parallelism...`)
+  console.log(`Searching for up to ${count} resolved/closed tickets...`)
 
-  // Fetch 10 pages in parallel at a time
-  for (let page = 1; page <= maxPages && tickets.length < count && !isTimeRunningOut(); page += 10) {
-    const batch: Promise<FreshdeskTicket[]>[] = []
+  // Use Search API - directly searches for resolved/closed tickets
+  // Search API returns max 30 per page, 10 pages per query (300 per query)
+  for (const status of [5, 4]) { // Closed first, then Resolved
+    if (tickets.length >= count || isTimeRunningOut()) break
 
-    for (let p = page; p < page + 10 && p <= maxPages; p++) {
-      batch.push(
-        fetch(
-          `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${p}&order_by=updated_at&order_type=desc&include=description`,
+    console.log(`Searching for tickets with status ${status}...`)
+
+    // Search with different date ranges to get past the 300 limit per query
+    const dateRanges = [
+      '', // No date filter (gets most recent)
+      "created_at:>'2025-01-01'",
+      "created_at:>'2024-01-01' AND created_at:<'2025-01-01'",
+      "created_at:>'2023-01-01' AND created_at:<'2024-01-01'",
+      "created_at:>'2022-01-01' AND created_at:<'2023-01-01'",
+      "created_at:>'2021-01-01' AND created_at:<'2022-01-01'",
+    ]
+
+    for (const dateFilter of dateRanges) {
+      if (tickets.length >= count || isTimeRunningOut()) break
+
+      let page = 1
+      const maxSearchPages = 10
+
+      while (page <= maxSearchPages && tickets.length < count && !isTimeRunningOut()) {
+        try {
+          const query = dateFilter
+            ? `"status:${status} AND ${dateFilter}"`
+            : `"status:${status}"`
+
+          const response = await fetch(
+            `https://${domain}/api/v2/search/tickets?query=${encodeURIComponent(query)}&page=${page}`,
+            {
+              headers: {
+                'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
+                'Content-Type': 'application/json',
+              },
+            }
+          )
+
+          if (!response.ok) {
+            console.log(`Search API returned ${response.status} for status ${status}, page ${page}`)
+            break
+          }
+
+          const data = await response.json()
+          if (!data.results || data.results.length === 0) {
+            break
+          }
+
+          // Filter out duplicates
+          const newTickets = data.results.filter((t: FreshdeskTicket) => !existingIds.has(t.id))
+          newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+          tickets.push(...newTickets)
+
+          console.log(`Search status:${status} ${dateFilter || '(recent)'} page ${page}: +${newTickets.length} (total: ${tickets.length})`)
+          page++
+
+          // Small delay for rate limiting
+          await new Promise(resolve => setTimeout(resolve, 50))
+        } catch (err) {
+          console.error(`Error searching status ${status}:`, err)
+          break
+        }
+      }
+    }
+  }
+
+  console.log(`Search API found ${tickets.length} tickets`)
+
+  // Supplement with standard tickets API if needed
+  if (tickets.length < count && !isTimeRunningOut()) {
+    console.log('Supplementing with standard tickets API...')
+
+    const perPage = 100
+    const maxPages = Math.min(100, Math.ceil((count - tickets.length) * 3 / perPage))
+
+    for (let page = 1; page <= maxPages && tickets.length < count && !isTimeRunningOut(); page++) {
+      try {
+        const response = await fetch(
+          `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${page}&order_by=updated_at&order_type=desc&include=description`,
           {
             headers: {
               'Authorization': 'Basic ' + btoa(`${apiKey}:X`),
@@ -66,31 +137,38 @@ async function fetchTicketsFast(domain: string, apiKey: string, count: number): 
             },
           }
         )
-          .then(res => res.ok ? res.json() : [])
-          .catch(() => [])
-      )
-    }
 
-    const results = await Promise.all(batch)
-    for (const data of results) {
-      if (Array.isArray(data)) {
-        const resolvedTickets = data.filter((t: FreshdeskTicket) =>
+        if (!response.ok) break
+
+        const data = await response.json()
+        if (!data || data.length === 0) break
+
+        // Filter for resolved/closed tickets we don't already have
+        const newTickets = data.filter((t: FreshdeskTicket) =>
           t.status >= 4 && !existingIds.has(t.id)
         )
-        resolvedTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
-        tickets.push(...resolvedTickets)
+
+        newTickets.forEach((t: FreshdeskTicket) => existingIds.add(t.id))
+        tickets.push(...newTickets)
+
+        if (newTickets.length > 0) {
+          console.log(`Standard API page ${page}: +${newTickets.length} (total: ${tickets.length})`)
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 50))
+      } catch (err) {
+        console.error(`Error fetching page ${page}:`, err)
+        break
       }
     }
-
-    if (tickets.length >= count) break
   }
 
-  console.log(`Found ${tickets.length} resolved/closed tickets in ${Date.now() - START_TIME}ms`)
+  console.log(`Total tickets found: ${tickets.length} in ${Date.now() - START_TIME}ms`)
   return tickets.slice(0, count)
 }
 
 /**
- * Fetch conversations for multiple tickets in parallel - HIGH concurrency
+ * Fetch conversations for multiple tickets in parallel
  */
 async function fetchConversationsBatch(
   domain: string,
@@ -164,7 +242,6 @@ function splitTextIntoChunks(text: string, chunkSize = 2000, overlap = 200): str
 }
 
 Deno.serve(async (req: Request) => {
-  // Reset start time for each request
   START_TIME = Date.now()
 
   if (req.method === 'OPTIONS') {
@@ -211,9 +288,9 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // PHASE 1: Fetch tickets (fast parallel)
-    const tickets = await fetchTicketsFast(freshdeskDomain, freshdeskApiKey, count)
-    console.log(`Fetched ${tickets.length} tickets in ${Date.now() - START_TIME}ms, ${timeLeft()}ms remaining`)
+    // PHASE 1: Fetch tickets using Search API
+    const tickets = await fetchTickets(freshdeskDomain, freshdeskApiKey, count)
+    console.log(`Fetched ${tickets.length} tickets, ${timeLeft()}ms remaining`)
 
     if (tickets.length === 0) {
       return new Response(
@@ -227,19 +304,17 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // PHASE 2: Fetch conversations in parallel batches of 20
+    // PHASE 2: Fetch conversations in parallel batches
     const learningDocs: string[] = []
     let processedCount = 0
-    const batchSize = 20
+    const batchSize = 15 // Process 15 tickets at a time
 
     for (let i = 0; i < tickets.length && !isTimeRunningOut(); i += batchSize) {
       const batch = tickets.slice(i, i + batchSize)
       const ticketIds = batch.map(t => t.id)
 
-      // Fetch all conversations in parallel
       const conversationsMap = await fetchConversationsBatch(freshdeskDomain, freshdeskApiKey, ticketIds)
 
-      // Process each ticket
       for (const ticket of batch) {
         const conversations = conversationsMap.get(ticket.id) || []
 
@@ -265,13 +340,13 @@ Deno.serve(async (req: Request) => {
         processedCount++
       }
 
-      // Minimal delay for rate limiting
+      // Rate limiting delay
       if (i + batchSize < tickets.length && !isTimeRunningOut()) {
-        await new Promise(resolve => setTimeout(resolve, 50))
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
     }
 
-    console.log(`Processed ${processedCount} tickets, ${learningDocs.length} docs in ${Date.now() - START_TIME}ms, ${timeLeft()}ms remaining`)
+    console.log(`Processed ${processedCount} tickets, ${learningDocs.length} docs, ${timeLeft()}ms remaining`)
 
     if (learningDocs.length === 0) {
       return new Response(
@@ -285,11 +360,11 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // PHASE 3: Save document (even if we run out of time for embeddings)
+    // PHASE 3: Save document
     const combinedContent = `# Learned from ${learningDocs.length} Support Conversations\n\n` +
       learningDocs.join('\n---\n\n')
 
-    // Delete existing learned-tickets document
+    // Delete existing learned-tickets documents
     const { data: existingDocs } = await supabase
       .from('documents')
       .select('id')
@@ -297,14 +372,10 @@ Deno.serve(async (req: Request) => {
       .like('name', 'Learned from Freshdesk%')
 
     if (existingDocs && existingDocs.length > 0) {
-      // Also delete associated chunks
       for (const existingDoc of existingDocs) {
         await supabase.from('chunks').delete().eq('document_id', existingDoc.id)
       }
-      await supabase
-        .from('documents')
-        .delete()
-        .in('id', existingDocs.map(d => d.id))
+      await supabase.from('documents').delete().in('id', existingDocs.map(d => d.id))
     }
 
     const docName = `Learned from Freshdesk (${learningDocs.length} tickets)`
@@ -324,11 +395,11 @@ Deno.serve(async (req: Request) => {
 
     console.log(`Document saved, ${timeLeft()}ms remaining for embeddings`)
 
-    // PHASE 4: Generate embeddings (in large batches)
+    // PHASE 4: Generate embeddings
     const chunks = splitTextIntoChunks(combinedContent)
     console.log(`Created ${chunks.length} chunks`)
 
-    const embeddingBatchSize = 100 // Large batches for speed
+    const embeddingBatchSize = 100
     const allEmbeddings: number[][] = []
 
     for (let i = 0; i < chunks.length && !isTimeRunningOut(); i += embeddingBatchSize) {
@@ -345,7 +416,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Store whatever chunks we managed to embed
+    // Store chunks
     if (allEmbeddings.length > 0) {
       const chunkRows = chunks.slice(0, allEmbeddings.length).map((content, index) => ({
         document_id: doc.id,
@@ -354,7 +425,6 @@ Deno.serve(async (req: Request) => {
       }))
 
       const { error: chunkError } = await supabase.from('chunks').insert(chunkRows)
-
       if (chunkError) {
         console.error('Chunk insert error:', chunkError)
       }
