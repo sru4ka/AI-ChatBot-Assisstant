@@ -11,7 +11,7 @@ interface RequestBody {
   businessId: string
   freshdeskDomain: string
   freshdeskApiKey: string
-  ticketCount: number // 100-5000
+  ticketCount: number
 }
 
 interface FreshdeskTicket {
@@ -29,33 +29,33 @@ interface FreshdeskConversation {
   created_at: string
 }
 
-const START_TIME = Date.now()
-const MAX_RUNTIME_MS = 55000 // 55 seconds max (leave 5s buffer)
+let START_TIME = Date.now()
+const MAX_RUNTIME_MS = 55000
+
+function timeLeft(): number {
+  return MAX_RUNTIME_MS - (Date.now() - START_TIME)
+}
 
 function isTimeRunningOut(): boolean {
-  return Date.now() - START_TIME > MAX_RUNTIME_MS
+  return timeLeft() < 5000
 }
 
 /**
- * Fetch resolved/closed tickets from Freshdesk - FAST version
+ * Fetch resolved/closed tickets - ULTRA FAST with high parallelism
  */
 async function fetchTicketsFast(domain: string, apiKey: string, count: number): Promise<FreshdeskTicket[]> {
   const tickets: FreshdeskTicket[] = []
   const existingIds = new Set<number>()
-
-  console.log(`Fast-fetching up to ${count} resolved/closed tickets...`)
-
-  // Use standard API with status filter - faster than search API
   const perPage = 100
-  const maxPages = Math.ceil(count * 1.5 / perPage) // Fetch extra to account for filtering
+  const maxPages = Math.ceil(count * 2 / perPage)
 
-  const fetchPromises: Promise<FreshdeskTicket[]>[] = []
+  console.log(`Fetching up to ${count} tickets with high parallelism...`)
 
-  // Fetch multiple pages in parallel (groups of 5)
-  for (let page = 1; page <= maxPages && !isTimeRunningOut(); page += 5) {
+  // Fetch 10 pages in parallel at a time
+  for (let page = 1; page <= maxPages && tickets.length < count && !isTimeRunningOut(); page += 10) {
     const batch: Promise<FreshdeskTicket[]>[] = []
 
-    for (let p = page; p < page + 5 && p <= maxPages; p++) {
+    for (let p = page; p < page + 10 && p <= maxPages; p++) {
       batch.push(
         fetch(
           `https://${domain}/api/v2/tickets?per_page=${perPage}&page=${p}&order_by=updated_at&order_type=desc&include=description`,
@@ -74,7 +74,6 @@ async function fetchTicketsFast(domain: string, apiKey: string, count: number): 
     const results = await Promise.all(batch)
     for (const data of results) {
       if (Array.isArray(data)) {
-        // Filter for resolved (4) and closed (5) tickets
         const resolvedTickets = data.filter((t: FreshdeskTicket) =>
           t.status >= 4 && !existingIds.has(t.id)
         )
@@ -84,17 +83,14 @@ async function fetchTicketsFast(domain: string, apiKey: string, count: number): 
     }
 
     if (tickets.length >= count) break
-
-    // Small delay between batches
-    await new Promise(resolve => setTimeout(resolve, 50))
   }
 
-  console.log(`Fast-fetch found ${tickets.length} resolved/closed tickets`)
+  console.log(`Found ${tickets.length} resolved/closed tickets in ${Date.now() - START_TIME}ms`)
   return tickets.slice(0, count)
 }
 
 /**
- * Fetch conversations for multiple tickets in parallel
+ * Fetch conversations for multiple tickets in parallel - HIGH concurrency
  */
 async function fetchConversationsBatch(
   domain: string,
@@ -115,8 +111,7 @@ async function fetchConversationsBatch(
         }
       )
       if (response.ok) {
-        const convos = await response.json()
-        results.set(ticketId, convos)
+        results.set(ticketId, await response.json())
       } else {
         results.set(ticketId, [])
       }
@@ -169,6 +164,9 @@ function splitTextIntoChunks(text: string, chunkSize = 2000, overlap = 200): str
 }
 
 Deno.serve(async (req: Request) => {
+  // Reset start time for each request
+  START_TIME = Date.now()
+
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -191,14 +189,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const count = Math.min(Math.max(ticketCount || 100, 10), 5000)
-
     console.log(`Processing ${count} tickets from ${freshdeskDomain}...`)
 
-    // Initialize clients
-    const openai = new OpenAI({
-      apiKey: Deno.env.get('OPENAI_API_KEY'),
-    })
-
+    const openai = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') })
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -218,9 +211,9 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Fetch tickets from Freshdesk - FAST
+    // PHASE 1: Fetch tickets (fast parallel)
     const tickets = await fetchTicketsFast(freshdeskDomain, freshdeskApiKey, count)
-    console.log(`Fetched ${tickets.length} tickets in ${Date.now() - START_TIME}ms`)
+    console.log(`Fetched ${tickets.length} tickets in ${Date.now() - START_TIME}ms, ${timeLeft()}ms remaining`)
 
     if (tickets.length === 0) {
       return new Response(
@@ -234,30 +227,28 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Process tickets in parallel batches to get conversations
+    // PHASE 2: Fetch conversations in parallel batches of 20
     const learningDocs: string[] = []
     let processedCount = 0
-    const batchSize = 10 // Process 10 tickets at a time
+    const batchSize = 20
 
     for (let i = 0; i < tickets.length && !isTimeRunningOut(); i += batchSize) {
       const batch = tickets.slice(i, i + batchSize)
       const ticketIds = batch.map(t => t.id)
 
-      // Fetch conversations in parallel
+      // Fetch all conversations in parallel
       const conversationsMap = await fetchConversationsBatch(freshdeskDomain, freshdeskApiKey, ticketIds)
 
       // Process each ticket
       for (const ticket of batch) {
         const conversations = conversationsMap.get(ticket.id) || []
 
-        // Build Q&A document
         let doc = `TICKET: ${ticket.subject}\n\n`
 
         if (ticket.description_text && ticket.description_text.trim()) {
           doc += `CUSTOMER QUERY:\n${ticket.description_text}\n\n`
         }
 
-        // Get agent responses
         const agentResponses = conversations.filter(c => !c.incoming && c.body_text && c.body_text.trim())
 
         if (agentResponses.length > 0) {
@@ -274,13 +265,13 @@ Deno.serve(async (req: Request) => {
         processedCount++
       }
 
-      // Small delay between batches for rate limiting
-      if (i + batchSize < tickets.length) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+      // Minimal delay for rate limiting
+      if (i + batchSize < tickets.length && !isTimeRunningOut()) {
+        await new Promise(resolve => setTimeout(resolve, 50))
       }
     }
 
-    console.log(`Processed ${processedCount} tickets, created ${learningDocs.length} docs in ${Date.now() - START_TIME}ms`)
+    console.log(`Processed ${processedCount} tickets, ${learningDocs.length} docs in ${Date.now() - START_TIME}ms, ${timeLeft()}ms remaining`)
 
     if (learningDocs.length === 0) {
       return new Response(
@@ -294,20 +285,7 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Check if time is running out
-    if (isTimeRunningOut()) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Processing timed out. Try with fewer tickets (500-1000).',
-          ticketsScanned: processedCount,
-          conversationsFound: learningDocs.length,
-        }),
-        { status: 408, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Combine all learning docs
+    // PHASE 3: Save document (even if we run out of time for embeddings)
     const combinedContent = `# Learned from ${learningDocs.length} Support Conversations\n\n` +
       learningDocs.join('\n---\n\n')
 
@@ -319,13 +297,16 @@ Deno.serve(async (req: Request) => {
       .like('name', 'Learned from Freshdesk%')
 
     if (existingDocs && existingDocs.length > 0) {
+      // Also delete associated chunks
+      for (const existingDoc of existingDocs) {
+        await supabase.from('chunks').delete().eq('document_id', existingDoc.id)
+      }
       await supabase
         .from('documents')
         .delete()
         .in('id', existingDocs.map(d => d.id))
     }
 
-    // Save new document
     const docName = `Learned from Freshdesk (${learningDocs.length} tickets)`
     const { data: doc, error: docError } = await supabase
       .from('documents')
@@ -341,54 +322,64 @@ Deno.serve(async (req: Request) => {
       throw new Error(`Failed to save document: ${docError.message}`)
     }
 
-    // Split into chunks and generate embeddings
+    console.log(`Document saved, ${timeLeft()}ms remaining for embeddings`)
+
+    // PHASE 4: Generate embeddings (in large batches)
     const chunks = splitTextIntoChunks(combinedContent)
     console.log(`Created ${chunks.length} chunks`)
 
-    // Generate embeddings in batches
-    const embeddingBatchSize = 50
+    const embeddingBatchSize = 100 // Large batches for speed
     const allEmbeddings: number[][] = []
 
     for (let i = 0; i < chunks.length && !isTimeRunningOut(); i += embeddingBatchSize) {
       const batch = chunks.slice(i, i + embeddingBatchSize)
-      const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: batch,
-      })
-      allEmbeddings.push(...embeddingResponse.data.map(d => d.embedding))
+      try {
+        const embeddingResponse = await openai.embeddings.create({
+          model: 'text-embedding-3-small',
+          input: batch,
+        })
+        allEmbeddings.push(...embeddingResponse.data.map(d => d.embedding))
+      } catch (e) {
+        console.error('Embedding error:', e)
+        break
+      }
     }
 
-    // Store chunks with embeddings
-    const chunkRows = chunks.slice(0, allEmbeddings.length).map((content, index) => ({
-      document_id: doc.id,
-      content,
-      embedding: allEmbeddings[index],
-    }))
+    // Store whatever chunks we managed to embed
+    if (allEmbeddings.length > 0) {
+      const chunkRows = chunks.slice(0, allEmbeddings.length).map((content, index) => ({
+        document_id: doc.id,
+        content,
+        embedding: allEmbeddings[index],
+      }))
 
-    const { error: chunkError } = await supabase
-      .from('chunks')
-      .insert(chunkRows)
+      const { error: chunkError } = await supabase.from('chunks').insert(chunkRows)
 
-    if (chunkError) {
-      await supabase.from('documents').delete().eq('id', doc.id)
-      throw new Error(`Failed to save chunks: ${chunkError.message}`)
+      if (chunkError) {
+        console.error('Chunk insert error:', chunkError)
+      }
     }
 
-    console.log(`Completed in ${Date.now() - START_TIME}ms`)
+    const totalTime = Date.now() - START_TIME
+    console.log(`Completed in ${totalTime}ms`)
 
     return new Response(
       JSON.stringify({
         success: true,
         ticketsScanned: processedCount,
         conversationsLearned: learningDocs.length,
-        chunksCreated: chunkRows.length,
+        chunksCreated: allEmbeddings.length,
+        totalChunks: chunks.length,
         documentId: doc.id,
-        processingTimeMs: Date.now() - START_TIME,
+        processingTimeMs: totalTime,
+        note: allEmbeddings.length < chunks.length
+          ? `Processed ${allEmbeddings.length}/${chunks.length} chunks before timeout`
+          : undefined,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
-    console.error('Error learning from tickets:', error)
+    console.error('Error:', error)
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : 'An unexpected error occurred'
