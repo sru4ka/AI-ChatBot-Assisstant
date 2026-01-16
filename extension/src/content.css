@@ -425,3 +425,255 @@
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* Dropdown Tabs */
+.dropdown-tabs {
+  display: flex;
+  border-bottom: 1px solid #e9ecef;
+  background: #f9fafb;
+}
+
+.dropdown-tab {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.dropdown-tab:hover {
+  color: #374151;
+  background: #f3f4f6;
+}
+
+.dropdown-tab.active {
+  color: #2c5cc5;
+  border-bottom-color: #2c5cc5;
+  background: white;
+}
+
+.dropdown-tab-content {
+  /* visible by default */
+}
+
+.dropdown-tab-content.hidden {
+  display: none;
+}
+
+/* Order Info Styles */
+.order-info-content {
+  padding: 16px;
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.order-info-loading {
+  text-align: center;
+  color: #666;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.order-info-loading .spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #2c5cc5;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.order-info-empty {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.order-info-empty p {
+  margin: 0 0 16px 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.order-info-no-results {
+  text-align: center;
+  padding: 20px;
+  background: #fef3cd;
+  border-radius: 6px;
+  color: #856404;
+}
+
+.order-info-error {
+  text-align: center;
+  padding: 16px;
+  background: #fef2f2;
+  border-radius: 6px;
+  color: #dc2626;
+}
+
+.order-info-error p {
+  margin: 0 0 12px 0;
+}
+
+/* Order Card */
+.order-card {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.order-card:last-child {
+  margin-bottom: 0;
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.order-number {
+  font-weight: 600;
+  font-size: 14px;
+  color: #2c5cc5;
+}
+
+.order-date {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.order-status {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  text-transform: capitalize;
+}
+
+.status-badge.paid {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.refunded {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.fulfilled {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.unfulfilled {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.status-badge.partial {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.order-total {
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 10px;
+  color: #111827;
+}
+
+.order-items {
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.order-item {
+  padding: 4px 0;
+  border-bottom: 1px dashed #e5e7eb;
+}
+
+.order-item:last-child {
+  border-bottom: none;
+}
+
+.order-tracking {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.order-tracking strong {
+  color: #111827;
+}
+
+.tracking-link {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.tracking-link:hover {
+  text-decoration: underline;
+}
+
+.order-shipping {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+
+.order-note {
+  font-size: 12px;
+  color: #374151;
+  background: #fff7ed;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  border-left: 3px solid #f97316;
+}
+
+.order-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.order-link-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background: #2c5cc5;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.order-link-btn:hover {
+  background: #264fab;
+}

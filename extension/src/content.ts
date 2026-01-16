@@ -315,20 +315,36 @@ function createPanel() {
   panelContainer.className = 'freshdesk-ai-panel-container hidden'
   panelContainer.innerHTML = `
     <div id="freshdesk-ai-dropdown-menu" class="freshdesk-ai-dropdown-menu hidden">
-      <div class="dropdown-section">
-        <label>Response Tone</label>
-        <div class="dropdown-tone-btns">
-          <button class="dropdown-tone-btn active" data-tone="professional">Professional</button>
-          <button class="dropdown-tone-btn" data-tone="friendly">Friendly</button>
-          <button class="dropdown-tone-btn" data-tone="concise">Concise</button>
+      <div class="dropdown-tabs">
+        <button class="dropdown-tab active" data-tab="settings">Settings</button>
+        <button class="dropdown-tab" data-tab="order-info">Order Info</button>
+      </div>
+      <div id="dropdown-tab-settings" class="dropdown-tab-content">
+        <div class="dropdown-section">
+          <label>Response Tone</label>
+          <div class="dropdown-tone-btns">
+            <button class="dropdown-tone-btn active" data-tone="professional">Professional</button>
+            <button class="dropdown-tone-btn" data-tone="friendly">Friendly</button>
+            <button class="dropdown-tone-btn" data-tone="concise">Concise</button>
+          </div>
+        </div>
+        <div class="dropdown-section">
+          <label>Custom Instructions</label>
+          <textarea id="freshdesk-ai-custom-prompt" placeholder="Add extra instructions for the AI..."></textarea>
+        </div>
+        <div class="dropdown-footer">
+          <button id="freshdesk-ai-save-settings" class="dropdown-save-btn">Save & Close</button>
         </div>
       </div>
-      <div class="dropdown-section">
-        <label>Custom Instructions</label>
-        <textarea id="freshdesk-ai-custom-prompt" placeholder="Add extra instructions for the AI..."></textarea>
-      </div>
-      <div class="dropdown-footer">
-        <button id="freshdesk-ai-save-settings" class="dropdown-save-btn">Save & Close</button>
+      <div id="dropdown-tab-order-info" class="dropdown-tab-content hidden">
+        <div id="order-info-content" class="order-info-content">
+          <div class="order-info-loading hidden"><span class="spinner"></span> Searching for orders...</div>
+          <div class="order-info-empty">
+            <p>Click "Search Orders" to find customer orders.</p>
+            <button id="freshdesk-ai-search-orders" class="dropdown-save-btn">🔍 Search Orders</button>
+          </div>
+          <div class="order-info-results hidden"></div>
+        </div>
       </div>
     </div>
     <div id="freshdesk-ai-result-panel" class="freshdesk-ai-result-panel hidden">
@@ -363,6 +379,24 @@ function setupEventListeners() {
   const customPromptInput = document.getElementById('freshdesk-ai-custom-prompt') as HTMLTextAreaElement
   const regenerateBtn = document.getElementById('freshdesk-ai-regenerate')
   const regenInput = document.getElementById('freshdesk-ai-regen-input') as HTMLInputElement
+  const searchOrdersBtn = document.getElementById('freshdesk-ai-search-orders')
+
+  // Tab switching
+  const dropdownTabs = panelContainer?.querySelectorAll('.dropdown-tab')
+  dropdownTabs?.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const tabId = (tab as HTMLElement).dataset.tab
+      dropdownTabs.forEach(t => t.classList.remove('active'))
+      tab.classList.add('active')
+
+      // Show/hide tab content
+      document.getElementById('dropdown-tab-settings')?.classList.toggle('hidden', tabId !== 'settings')
+      document.getElementById('dropdown-tab-order-info')?.classList.toggle('hidden', tabId !== 'order-info')
+    })
+  })
+
+  // Search orders button
+  searchOrdersBtn?.addEventListener('click', handleSearchOrders)
 
   // Add event listeners to all main buttons (there may be multiple)
   const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
@@ -691,6 +725,199 @@ async function saveToKnowledgeBase(question: string, answer: string) {
       answer,
     }),
   })
+}
+
+// Extract customer email from the ticket page
+function extractCustomerEmail(): string | null {
+  const bodyText = document.body.innerText || ''
+
+  // Check for contact form email field
+  const emailFieldMatch = bodyText.match(/Email:\s*\n?([^\n]+@[^\n]+)/i)
+  if (emailFieldMatch) {
+    return emailFieldMatch[1].trim()
+  }
+
+  // Look for email in the page (common patterns)
+  const emailSelectors = [
+    '.requester-email',
+    '.customer-email',
+    '[data-testid="requester-email"]',
+    '.contact-email',
+    '.ticket-requester a[href^="mailto:"]',
+    'a[href^="mailto:"]',
+  ]
+
+  for (const selector of emailSelectors) {
+    try {
+      const el = document.querySelector(selector)
+      if (el) {
+        const text = el.textContent?.trim() || ''
+        if (text.includes('@')) {
+          return text
+        }
+        // Check href for mailto
+        const href = el.getAttribute('href')
+        if (href?.startsWith('mailto:')) {
+          return href.replace('mailto:', '')
+        }
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Try to find email pattern in visible text
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+  const emails = bodyText.match(emailPattern)
+  if (emails && emails.length > 0) {
+    // Return first non-support/internal email
+    for (const email of emails) {
+      if (!email.includes('freshdesk') && !email.includes('support@')) {
+        return email
+      }
+    }
+  }
+
+  return null
+}
+
+// Search for orders from Shopify
+async function handleSearchOrders() {
+  const orderInfoContent = document.getElementById('order-info-content')
+  const loadingEl = orderInfoContent?.querySelector('.order-info-loading')
+  const emptyEl = orderInfoContent?.querySelector('.order-info-empty')
+  const resultsEl = orderInfoContent?.querySelector('.order-info-results')
+
+  if (!orderInfoContent || !loadingEl || !emptyEl || !resultsEl) return
+
+  // Show loading
+  loadingEl.classList.remove('hidden')
+  emptyEl.classList.add('hidden')
+  resultsEl.classList.add('hidden')
+
+  try {
+    // Extract customer email from ticket
+    const customerEmail = extractCustomerEmail()
+
+    if (!customerEmail) {
+      throw new Error('Could not find customer email on this ticket')
+    }
+
+    // Get auth session
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+      throw new Error('Chrome storage not available')
+    }
+
+    const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+    let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+
+    if (typeof authData === 'string') {
+      authData = JSON.parse(authData)
+    }
+
+    if (!authData?.access_token) {
+      throw new Error('Please log in via the extension popup first')
+    }
+
+    // Call the shopify-orders endpoint
+    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authData.access_token}`,
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+      },
+      body: JSON.stringify({
+        businessId: authData.user?.id,
+        searchQuery: customerEmail,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || 'Failed to search orders')
+    }
+
+    const data = await response.json()
+
+    if (!data.found || !data.orders || data.orders.length === 0) {
+      resultsEl.innerHTML = `
+        <div class="order-info-no-results">
+          <p>No orders found for <strong>${customerEmail}</strong></p>
+        </div>
+      `
+      resultsEl.classList.remove('hidden')
+      return
+    }
+
+    // Render orders
+    resultsEl.innerHTML = data.orders.map((order: {
+      name: string
+      date: string
+      status: string
+      fulfillmentStatus: string | null
+      total: string
+      trackingNumbers: string[]
+      trackingUrls: string[]
+      trackingCompanies: string[]
+      note: string | null
+      items: { title: string; quantity: number; price: string }[]
+      shippingAddress: { city: string; province: string; country: string } | null
+      adminUrl: string
+    }) => `
+      <div class="order-card">
+        <div class="order-header">
+          <span class="order-number">${order.name}</span>
+          <span class="order-date">${new Date(order.date).toLocaleDateString()}</span>
+        </div>
+        <div class="order-status">
+          <span class="status-badge ${order.status}">${order.status}</span>
+          ${order.fulfillmentStatus ? `<span class="status-badge ${order.fulfillmentStatus}">${order.fulfillmentStatus}</span>` : ''}
+        </div>
+        <div class="order-total">${order.total}</div>
+        ${order.items && order.items.length > 0 ? `
+          <div class="order-items">
+            ${order.items.map((item: { title: string; quantity: number }) => `<div class="order-item">${item.title} x${item.quantity}</div>`).join('')}
+          </div>
+        ` : ''}
+        ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
+          <div class="order-tracking">
+            <strong>Tracking:</strong>
+            ${order.trackingUrls && order.trackingUrls.length > 0
+              ? order.trackingNumbers.map((num: string, i: number) => `<a href="${order.trackingUrls[i] || '#'}" target="_blank" class="tracking-link">${order.trackingCompanies?.[i] || ''} ${num}</a>`).join(', ')
+              : order.trackingNumbers.join(', ')
+            }
+          </div>
+        ` : '<div class="order-tracking"><em>No tracking info available</em></div>'}
+        ${order.shippingAddress ? `
+          <div class="order-shipping">Ships to: ${order.shippingAddress.city}, ${order.shippingAddress.province}, ${order.shippingAddress.country}</div>
+        ` : ''}
+        ${order.note ? `
+          <div class="order-note"><strong>Note:</strong> ${order.note}</div>
+        ` : ''}
+        <div class="order-actions">
+          <a href="${order.adminUrl}" target="_blank" class="order-link-btn">View in Shopify</a>
+        </div>
+      </div>
+    `).join('')
+
+    resultsEl.classList.remove('hidden')
+    showToast(`Found ${data.orders.length} order(s)`, 'success')
+  } catch (error) {
+    console.error('Error searching orders:', error)
+    resultsEl.innerHTML = `
+      <div class="order-info-error">
+        <p>Error: ${error instanceof Error ? error.message : 'Failed to search orders'}</p>
+        <button id="freshdesk-ai-retry-search" class="dropdown-save-btn">Retry</button>
+      </div>
+    `
+    resultsEl.classList.remove('hidden')
+
+    // Add retry handler
+    document.getElementById('freshdesk-ai-retry-search')?.addEventListener('click', handleSearchOrders)
+  } finally {
+    loadingEl.classList.add('hidden')
+  }
 }
 
 function showToast(message: string, type: 'success' | 'error') {

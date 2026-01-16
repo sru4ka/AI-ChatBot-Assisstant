@@ -24,6 +24,10 @@ interface ShopifyOrder {
   line_items: ShopifyLineItem[]
   shipping_address: ShopifyAddress | null
   tracking_numbers: string[]
+  tracking_urls: string[]
+  tracking_companies: string[]
+  note: string | null
+  note_attributes: { name: string; value: string }[]
 }
 
 interface ShopifyLineItem {
@@ -102,8 +106,10 @@ async function searchOrders(
         // Get tracking info for each order
         for (const order of data.orders) {
           const trackingNumbers: string[] = []
+          const trackingUrls: string[] = []
+          const trackingCompanies: string[] = []
 
-          // Fetch fulfillments to get tracking numbers
+          // Fetch fulfillments to get tracking details
           try {
             const fulfillmentsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/fulfillments.json`
             const fulfillmentsResponse = await fetch(fulfillmentsUrl, {
@@ -119,6 +125,12 @@ async function searchOrders(
                 if (fulfillment.tracking_number) {
                   trackingNumbers.push(fulfillment.tracking_number)
                 }
+                if (fulfillment.tracking_url) {
+                  trackingUrls.push(fulfillment.tracking_url)
+                }
+                if (fulfillment.tracking_company) {
+                  trackingCompanies.push(fulfillment.tracking_company)
+                }
               }
             }
           } catch (e) {
@@ -126,6 +138,8 @@ async function searchOrders(
           }
 
           order.tracking_numbers = trackingNumbers
+          order.tracking_urls = trackingUrls
+          order.tracking_companies = trackingCompanies
         }
 
         allOrders.push(...data.orders)
@@ -251,6 +265,7 @@ Deno.serve(async (req: Request) => {
       JSON.stringify({
         success: true,
         found: true,
+        storeDomain: business.shopify_domain,
         orders: orders.map(o => ({
           id: o.id,
           name: o.name,
@@ -260,7 +275,22 @@ Deno.serve(async (req: Request) => {
           total: `${o.total_price} ${o.currency}`,
           date: o.created_at,
           trackingNumbers: o.tracking_numbers,
+          trackingUrls: o.tracking_urls,
+          trackingCompanies: o.tracking_companies,
+          note: o.note,
+          noteAttributes: o.note_attributes,
           itemCount: o.line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0,
+          items: o.line_items?.slice(0, 5).map(item => ({
+            title: item.title,
+            quantity: item.quantity,
+            price: item.price,
+          })),
+          shippingAddress: o.shipping_address ? {
+            city: o.shipping_address.city,
+            province: o.shipping_address.province,
+            country: o.shipping_address.country,
+          } : null,
+          adminUrl: `https://${business.shopify_domain}/admin/orders/${o.id}`,
         })),
         formatted,
       }),
