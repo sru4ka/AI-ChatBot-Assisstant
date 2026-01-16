@@ -744,7 +744,6 @@ function extractCustomerInfo(): CustomerInfo {
   }
 
   const bodyText = document.body.innerText || ''
-  const bodyHtml = document.body.innerHTML || ''
 
   // 1. Extract requester name from Freshdesk (the customer who submitted the ticket)
   // Look for the ticket requester name (shown at top of ticket)
@@ -963,9 +962,27 @@ async function handleSearchOrders() {
       throw new Error('Please log in via the extension popup first')
     }
 
+    // Define order type for proper typing
+    interface ShopifyOrderResult {
+      name: string
+      date: string
+      status: string
+      fulfillmentStatus: string | null
+      total: string
+      trackingNumbers: string[]
+      trackingUrls: string[]
+      trackingCompanies: string[]
+      trackingStatuses: string[]
+      note: string | null
+      noteAttributes: { name: string; value: string }[] | null
+      events: { id: number; created_at: string; message: string; subject_type: string; verb: string; author: string | null; body: string | null }[]
+      items: { title: string; quantity: number; price: string }[]
+      shippingAddress: { city: string; province: string; country: string } | null
+      adminUrl: string
+    }
+
     // Try each search query until we find results
-    let data: { found: boolean; orders: unknown[] } | null = null
-    let usedQuery = ''
+    let data: { found: boolean; orders: ShopifyOrderResult[] } | null = null
 
     for (const query of searchQueries) {
       console.log('Trying search query:', query)
@@ -991,7 +1008,6 @@ async function handleSearchOrders() {
       const result = await response.json()
       if (result.found && result.orders && result.orders.length > 0) {
         data = result
-        usedQuery = query
         console.log('Found orders with query:', query)
         break
       }
@@ -1016,23 +1032,7 @@ async function handleSearchOrders() {
     }
 
     // Render orders
-    resultsEl.innerHTML = data.orders.map((order: {
-      name: string
-      date: string
-      status: string
-      fulfillmentStatus: string | null
-      total: string
-      trackingNumbers: string[]
-      trackingUrls: string[]
-      trackingCompanies: string[]
-      trackingStatuses: string[]
-      note: string | null
-      noteAttributes: { name: string; value: string }[] | null
-      events: { id: number; created_at: string; message: string; subject_type: string; verb: string; author: string | null; body: string | null }[]
-      items: { title: string; quantity: number; price: string }[]
-      shippingAddress: { city: string; province: string; country: string } | null
-      adminUrl: string
-    }) => `
+    resultsEl.innerHTML = data.orders.map((order) => `
       <div class="order-card">
         <div class="order-header">
           <span class="order-number">${order.name}</span>
