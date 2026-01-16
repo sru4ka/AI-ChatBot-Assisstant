@@ -115,7 +115,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
   const [freshdeskApiKey, setFreshdeskApiKey] = useState(business.freshdesk_api_key || '')
   const [shopifyDomain, setShopifyDomain] = useState((business as any).shopify_domain || '')
   const [shopifyAccessToken, setShopifyAccessToken] = useState((business as any).shopify_access_token || '')
-  const [trackingApiKey, setTrackingApiKey] = useState((business as any).tracking_api_key || '')
   const [websiteUrl, setWebsiteUrl] = useState((business as any).website_url || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -137,7 +136,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
           freshdesk_api_key: freshdeskApiKey || null,
           shopify_domain: shopifyDomain || null,
           shopify_access_token: shopifyAccessToken || null,
-          tracking_api_key: trackingApiKey || null,
           website_url: websiteUrl || null,
         })
         .eq('id', business.id)
@@ -342,47 +340,6 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
                 <li><strong>Shopify Access Token:</strong> paste the <code>shpat_...</code> token</li>
                 <li>Click <strong>"Save Settings"</strong></li>
               </ol>
-            </div>
-          </details>
-        </CollapsibleSection>
-
-        {/* TrackingMore Integration */}
-        <CollapsibleSection
-          title="Package Tracking (TrackingMore)"
-          subtitle={trackingApiKey ? 'Configured' : 'Optional - for real-time tracking status'}
-          icon="📦"
-          color="#b45309"
-          bgColor="#fffbeb"
-          borderColor="#fcd34d"
-        >
-          <div className="form-group" style={{ marginBottom: '1rem' }}>
-            <label htmlFor="trackingApiKey">TrackingMore API Key</label>
-            <input
-              id="trackingApiKey"
-              type="password"
-              value={trackingApiKey}
-              onChange={(e) => setTrackingApiKey(e.target.value)}
-              placeholder="Your TrackingMore API key"
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #d1d5db' }}
-            />
-          </div>
-
-          <details style={{ fontSize: '0.85rem', color: '#666' }}>
-            <summary style={{ cursor: 'pointer', color: '#b45309', fontWeight: '500' }}>
-              📋 How to get TrackingMore API Key
-            </summary>
-            <div style={{ margin: '0.75rem 0 0 0', lineHeight: '1.8' }}>
-              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
-                <li>Go to <a href="https://www.trackingmore.com" target="_blank" rel="noopener noreferrer" style={{ color: '#b45309' }}>trackingmore.com</a></li>
-                <li>Click <strong>"Sign Up"</strong> and create an account</li>
-                <li>Go to <strong>"Developer" → "API Key"</strong> in sidebar</li>
-                <li>Click <strong>"Generate"</strong> to create an API key</li>
-                <li>Copy the API key and paste it here</li>
-                <li>Click <strong>"Save Settings"</strong></li>
-              </ol>
-              <p style={{ marginTop: '0.75rem', padding: '0.5rem', background: '#fef3c7', borderRadius: '4px' }}>
-                <strong>Free tier:</strong> 50 tracking queries per month (1,536 carriers supported)
-              </p>
             </div>
           </details>
         </CollapsibleSection>
