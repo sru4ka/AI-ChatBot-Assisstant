@@ -185,6 +185,52 @@ export function getLatestCustomerMessage(): string | null {
     return true
   }
 
+  // Strategy 0: Detect and parse CONTACT FORM submissions
+  // Contact forms have structured fields like "Name:", "Email:", "Comment:", etc.
+  const bodyText = document.body.innerText || document.body.textContent || ''
+
+  // Check if this looks like a contact form submission
+  const contactFormPatterns = [
+    /Comment:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Message:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Inquiry:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Question:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Details:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+  ]
+
+  // Indicators that this is a contact form
+  const isContactForm = /(?:Name:|Email:|Phone\s*(?:Number)?:|Country\s*(?:Code)?:)/i.test(bodyText) &&
+                        /(?:Comment:|Message:|Inquiry:|Question:|Details:)/i.test(bodyText)
+
+  if (isContactForm) {
+    console.log('Freshdesk AI: Detected contact form submission')
+
+    for (const pattern of contactFormPatterns) {
+      const match = bodyText.match(pattern)
+      if (match && match[1]) {
+        const comment = match[1].trim()
+        if (comment.length > 20) {
+          console.log('Freshdesk AI: Extracted comment from contact form')
+
+          // Also try to get customer name for context
+          const nameMatch = bodyText.match(/Name:\s*\n?([^\n]+)/i)
+          const customerName = nameMatch ? nameMatch[1].trim() : 'Customer'
+
+          // Also get email if available
+          const emailMatch = bodyText.match(/Email:\s*\n?([^\n]+)/i)
+          const customerEmail = emailMatch ? emailMatch[1].trim() : ''
+
+          // Build context string
+          let contextInfo = `[Contact form submission from ${customerName}`
+          if (customerEmail) contextInfo += ` (${customerEmail})`
+          contextInfo += `]\n\n`
+
+          return (contextInfo + comment).slice(0, 2000)
+        }
+      }
+    }
+  }
+
   // Strategy 1: Look for the email body content specifically
   // Freshdesk displays emails in specific containers
   const emailBodySelectors = [
@@ -595,6 +641,44 @@ export function getFullConversation(): string | null {
     if (!/[.!?]/.test(trimmed)) return false
     if (trimmed.split(/\s+/).length < 8) return false
     return !isMetadata(trimmed)
+  }
+
+  // Strategy 0: Detect and parse CONTACT FORM submissions
+  const bodyText = document.body.innerText || document.body.textContent || ''
+  const contactFormPatterns = [
+    /Comment:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Message:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+    /Inquiry:\s*\n?([\s\S]*?)(?=\n\s*(?:Tags:|$))/i,
+  ]
+
+  const isContactForm = /(?:Name:|Email:|Phone\s*(?:Number)?:|Country\s*(?:Code)?:)/i.test(bodyText) &&
+                        /(?:Comment:|Message:|Inquiry:)/i.test(bodyText)
+
+  if (isContactForm) {
+    console.log('Freshdesk AI: Detected contact form in conversation')
+    for (const pattern of contactFormPatterns) {
+      const match = bodyText.match(pattern)
+      if (match && match[1]) {
+        const comment = match[1].trim()
+        if (comment.length > 20) {
+          const nameMatch = bodyText.match(/Name:\s*\n?([^\n]+)/i)
+          const customerName = nameMatch ? nameMatch[1].trim() : 'Customer'
+          const emailMatch = bodyText.match(/Email:\s*\n?([^\n]+)/i)
+          const customerEmail = emailMatch ? emailMatch[1].trim() : ''
+
+          let contextInfo = `[Contact form from ${customerName}`
+          if (customerEmail) contextInfo += ` (${customerEmail})`
+          contextInfo += `]`
+
+          messages.push({
+            sender: 'customer',
+            text: `${contextInfo}\n\n${comment}`
+          })
+          console.log('Freshdesk AI: Extracted contact form message')
+          break
+        }
+      }
+    }
   }
 
   // Strategy 1: Look for structured conversation threads
