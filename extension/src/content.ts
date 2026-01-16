@@ -727,38 +727,47 @@ async function saveToKnowledgeBase(question: string, answer: string) {
   })
 }
 
-// Extract customer email from the ticket page
-function extractCustomerEmail(): string | null {
-  const bodyText = document.body.innerText || ''
+// Extract customer info from the Freshdesk ticket page
+interface CustomerInfo {
+  email: string | null
+  name: string | null
+  phone: string | null
+  orderNumber: string | null
+}
 
-  // Check for contact form email field
-  const emailFieldMatch = bodyText.match(/Email:\s*\n?([^\n]+@[^\n]+)/i)
-  if (emailFieldMatch) {
-    return emailFieldMatch[1].trim()
+function extractCustomerInfo(): CustomerInfo {
+  const info: CustomerInfo = {
+    email: null,
+    name: null,
+    phone: null,
+    orderNumber: null,
   }
 
-  // Look for email in the page (common patterns)
-  const emailSelectors = [
-    '.requester-email',
-    '.customer-email',
-    '[data-testid="requester-email"]',
-    '.contact-email',
-    '.ticket-requester a[href^="mailto:"]',
-    'a[href^="mailto:"]',
+  const bodyText = document.body.innerText || ''
+  const bodyHtml = document.body.innerHTML || ''
+
+  // 1. Extract requester name from Freshdesk (the customer who submitted the ticket)
+  // Look for the ticket requester name (shown at top of ticket)
+  const requesterNameSelectors = [
+    '.requester-name',
+    '.ticket-requester-name',
+    '[data-testid="requester-name"]',
+    '.contact-name',
+    // Freshdesk specific: the name shown in ticket header
+    '.ticket-header .name',
+    '.fw-ticket-header .name',
+    '.reported-by a',
+    '.requester a',
   ]
 
-  for (const selector of emailSelectors) {
+  for (const selector of requesterNameSelectors) {
     try {
       const el = document.querySelector(selector)
       if (el) {
-        const text = el.textContent?.trim() || ''
-        if (text.includes('@')) {
-          return text
-        }
-        // Check href for mailto
-        const href = el.getAttribute('href')
-        if (href?.startsWith('mailto:')) {
-          return href.replace('mailto:', '')
+        const text = el.textContent?.trim()
+        if (text && text.length > 2 && !text.includes('@')) {
+          info.name = text
+          break
         }
       }
     } catch (e) {
@@ -766,19 +775,136 @@ function extractCustomerEmail(): string | null {
     }
   }
 
-  // Try to find email pattern in visible text
-  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
-  const emails = bodyText.match(emailPattern)
-  if (emails && emails.length > 0) {
-    // Return first non-support/internal email
-    for (const email of emails) {
-      if (!email.includes('freshdesk') && !email.includes('support@')) {
-        return email
+  // Also try to find name from "reported via email" pattern
+  const reportedByMatch = bodyText.match(/([A-Z][a-z]+ [A-Z][a-z]+)\s+reported via email/i)
+  if (reportedByMatch && !info.name) {
+    info.name = reportedByMatch[1]
+  }
+
+  // 2. Extract requester email (the customer's email, NOT the support email)
+  // First try specific Freshdesk selectors
+  const emailSelectors = [
+    '.requester-email',
+    '.customer-email',
+    '[data-testid="requester-email"]',
+    '.contact-email',
+    '.ticket-requester a[href^="mailto:"]',
+  ]
+
+  for (const selector of emailSelectors) {
+    try {
+      const el = document.querySelector(selector)
+      if (el) {
+        const text = el.textContent?.trim() || ''
+        if (text.includes('@') && !text.toLowerCase().includes('support@')) {
+          info.email = text
+          break
+        }
+        const href = el.getAttribute('href')
+        if (href?.startsWith('mailto:')) {
+          const email = href.replace('mailto:', '')
+          if (!email.toLowerCase().includes('support@')) {
+            info.email = email
+            break
+          }
+        }
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Try to find email from the message content - look for customer email in "From:" or similar
+  if (!info.email) {
+    // Look for contact form email field
+    const emailFieldMatch = bodyText.match(/(?:Email|From|Customer Email):\s*\n?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i)
+    if (emailFieldMatch) {
+      const email = emailFieldMatch[1].trim()
+      if (!email.toLowerCase().includes('support@') && !email.toLowerCase().includes('ergonomiclux')) {
+        info.email = email
       }
     }
   }
 
-  return null
+  // Find all emails on the page and pick the best one (customer email)
+  if (!info.email) {
+    const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+    const emails = bodyText.match(emailPattern)
+    if (emails && emails.length > 0) {
+      // Filter out support/internal emails and find customer email
+      for (const email of emails) {
+        const lowerEmail = email.toLowerCase()
+        if (!lowerEmail.includes('freshdesk') &&
+            !lowerEmail.includes('support@') &&
+            !lowerEmail.includes('noreply') &&
+            !lowerEmail.includes('ergonomiclux.com') &&  // Filter out your own domain
+            !lowerEmail.includes('neckfort')) {
+          info.email = email
+          break
+        }
+      }
+    }
+  }
+
+  // 3. Extract phone number
+  const phoneSelectors = [
+    '.requester-phone',
+    '.customer-phone',
+    '.contact-phone',
+  ]
+
+  for (const selector of phoneSelectors) {
+    try {
+      const el = document.querySelector(selector)
+      if (el) {
+        const text = el.textContent?.trim()
+        if (text && /[\d\s\-+()]{7,}/.test(text)) {
+          info.phone = text.replace(/\D/g, '')
+          break
+        }
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Also try to find phone from text
+  if (!info.phone) {
+    const phoneMatch = bodyText.match(/(?:Phone|Tel|Mobile|Cell):\s*\n?([\d\s\-+()]{7,})/i)
+    if (phoneMatch) {
+      info.phone = phoneMatch[1].replace(/\D/g, '')
+    }
+  }
+
+  // 4. Extract order number from message content
+  // Look for patterns like #2213, Order #2213, Order: 2213, etc.
+  const orderPatterns = [
+    /Order\s*#?\s*(\d{3,})/i,
+    /#(\d{4,})/,
+    /Order\s*(?:Number|No|ID)?:?\s*#?(\d{3,})/i,
+    /ORDER\s*#(\d+)/i,
+  ]
+
+  for (const pattern of orderPatterns) {
+    const match = bodyText.match(pattern)
+    if (match) {
+      info.orderNumber = match[1]
+      break
+    }
+  }
+
+  // Also check the subject line specifically
+  const subjectEl = document.querySelector('.ticket-subject, .subject, h1, h2')
+  if (subjectEl && !info.orderNumber) {
+    const subjectText = subjectEl.textContent || ''
+    const subjectOrderMatch = subjectText.match(/Order\s*#?\s*(\d{3,})/i) || subjectText.match(/#(\d{4,})/)
+    if (subjectOrderMatch) {
+      info.orderNumber = subjectOrderMatch[1]
+    }
+  }
+
+  console.log('Extracted customer info:', info)
+  return info
 }
 
 // Search for orders from Shopify
@@ -796,12 +922,30 @@ async function handleSearchOrders() {
   resultsEl.classList.add('hidden')
 
   try {
-    // Extract customer email from ticket
-    const customerEmail = extractCustomerEmail()
+    // Extract customer info from ticket
+    const customerInfo = extractCustomerInfo()
 
-    if (!customerEmail) {
-      throw new Error('Could not find customer email on this ticket')
+    // Build search queries in priority order: order number > name > email > phone
+    const searchQueries: string[] = []
+
+    if (customerInfo.orderNumber) {
+      searchQueries.push(`#${customerInfo.orderNumber}`)
     }
+    if (customerInfo.name) {
+      searchQueries.push(customerInfo.name)
+    }
+    if (customerInfo.email) {
+      searchQueries.push(customerInfo.email)
+    }
+    if (customerInfo.phone) {
+      searchQueries.push(customerInfo.phone)
+    }
+
+    if (searchQueries.length === 0) {
+      throw new Error('Could not find customer info (name, email, phone, or order number) on this ticket')
+    }
+
+    console.log('Search queries to try:', searchQueries)
 
     // Get auth session
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
@@ -819,31 +963,52 @@ async function handleSearchOrders() {
       throw new Error('Please log in via the extension popup first')
     }
 
-    // Call the shopify-orders endpoint
-    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authData.access_token}`,
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-      },
-      body: JSON.stringify({
-        businessId: authData.user?.id,
-        searchQuery: customerEmail,
-      }),
-    })
+    // Try each search query until we find results
+    let data: { found: boolean; orders: unknown[] } | null = null
+    let usedQuery = ''
 
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.error || 'Failed to search orders')
+    for (const query of searchQueries) {
+      console.log('Trying search query:', query)
+
+      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          searchQuery: query,
+        }),
+      })
+
+      if (!response.ok) {
+        console.warn('Search failed for query:', query)
+        continue
+      }
+
+      const result = await response.json()
+      if (result.found && result.orders && result.orders.length > 0) {
+        data = result
+        usedQuery = query
+        console.log('Found orders with query:', query)
+        break
+      }
     }
 
-    const data = await response.json()
+    if (!data || !data.found || !data.orders || data.orders.length === 0) {
+      const searchedInfo = [
+        customerInfo.orderNumber ? `Order #${customerInfo.orderNumber}` : null,
+        customerInfo.name,
+        customerInfo.email,
+        customerInfo.phone,
+      ].filter(Boolean).join(', ')
 
-    if (!data.found || !data.orders || data.orders.length === 0) {
       resultsEl.innerHTML = `
         <div class="order-info-no-results">
-          <p>No orders found for <strong>${customerEmail}</strong></p>
+          <p>No orders found for:</p>
+          <p><strong>${searchedInfo || 'Unknown customer'}</strong></p>
         </div>
       `
       resultsEl.classList.remove('hidden')

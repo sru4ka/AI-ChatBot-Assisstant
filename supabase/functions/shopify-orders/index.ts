@@ -73,6 +73,8 @@ async function searchOrders(
   // Try different search strategies
   const searches: string[] = []
 
+  console.log('Searching for:', query)
+
   // Check if it looks like an order number
   if (query.startsWith('#') || /^\d+$/.test(query)) {
     const orderNum = query.replace('#', '')
@@ -89,10 +91,27 @@ async function searchOrders(
     searches.push(`phone:${query.replace(/\D/g, '')}`)
   }
 
-  // If no specific type detected, search by email
+  // Check if it looks like a customer name (contains space, no special chars)
+  if (query.includes(' ') && !query.includes('@') && !/^\d+$/.test(query)) {
+    // Search by customer name - try both first name and full name
+    const nameParts = query.trim().split(/\s+/)
+    if (nameParts.length >= 2) {
+      // Try first name + last name
+      searches.push(`customer_name:${query}`)
+      // Also try just by first name
+      searches.push(`customer_first_name:${nameParts[0]}`)
+    } else {
+      searches.push(`customer_name:${query}`)
+    }
+  }
+
+  // If no specific type detected, try as general search
   if (searches.length === 0) {
     searches.push(`email:${query}`)
+    searches.push(`customer_name:${query}`)
   }
+
+  console.log('Search queries:', searches)
 
   const allOrders: ShopifyOrder[] = []
 
