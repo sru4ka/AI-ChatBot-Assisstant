@@ -155,32 +155,85 @@ async function searchOrders(
             console.warn('Error fetching fulfillments:', e)
           }
 
-          // Fetch order events (timeline with comments)
+          // Fetch order timeline events using GraphQL (includes staff comments)
           try {
-            const eventsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/events.json`
-            const eventsResponse = await fetch(eventsUrl, {
+            const graphqlUrl = `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`
+            const graphqlQuery = `
+              query getOrderTimeline($id: ID!) {
+                order(id: $id) {
+                  events(first: 20, sortKey: CREATED_AT, reverse: true) {
+                    edges {
+                      node {
+                        id
+                        createdAt
+                        message
+                        ... on CommentEvent {
+                          rawMessage
+                          author {
+                            name
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `
+
+            const graphqlResponse = await fetch(graphqlUrl, {
+              method: 'POST',
               headers: {
                 'X-Shopify-Access-Token': accessToken,
                 'Content-Type': 'application/json',
               },
+              body: JSON.stringify({
+                query: graphqlQuery,
+                variables: { id: `gid://shopify/Order/${order.id}` }
+              }),
             })
 
-            if (eventsResponse.ok) {
-              const eventsData = await eventsResponse.json()
-              events = (eventsData.events || [])
-                .slice(0, 15) // Limit to 15 most recent events
-                .map((e: { id: number; created_at: string; message: string; subject_type: string; verb: string; author?: string; body?: string }) => ({
-                  id: e.id,
-                  created_at: e.created_at,
-                  message: e.message,
-                  subject_type: e.subject_type,
-                  verb: e.verb,
-                  author: e.author || null,
-                  body: e.body || null,
-                }))
+            if (graphqlResponse.ok) {
+              const graphqlData = await graphqlResponse.json()
+              const timelineEvents = graphqlData.data?.order?.events?.edges || []
+              events = timelineEvents.map((edge: { node: { id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string } } }) => ({
+                id: edge.node.id,
+                created_at: edge.node.createdAt,
+                message: edge.node.message,
+                subject_type: 'Order',
+                verb: edge.node.rawMessage ? 'comment' : 'event',
+                author: edge.node.author?.name || null,
+                body: edge.node.rawMessage || null,
+              }))
             }
           } catch (e) {
-            console.warn('Error fetching events:', e)
+            console.warn('Error fetching timeline events:', e)
+            // Fallback to REST Events API
+            try {
+              const eventsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/events.json`
+              const eventsResponse = await fetch(eventsUrl, {
+                headers: {
+                  'X-Shopify-Access-Token': accessToken,
+                  'Content-Type': 'application/json',
+                },
+              })
+
+              if (eventsResponse.ok) {
+                const eventsData = await eventsResponse.json()
+                events = (eventsData.events || [])
+                  .slice(0, 15)
+                  .map((e: { id: number; created_at: string; message: string; subject_type: string; verb: string; author?: string; body?: string }) => ({
+                    id: e.id,
+                    created_at: e.created_at,
+                    message: e.message,
+                    subject_type: e.subject_type,
+                    verb: e.verb,
+                    author: e.author || null,
+                    body: e.body || null,
+                  }))
+              }
+            } catch (restError) {
+              console.warn('Error fetching REST events:', restError)
+            }
           }
 
           order.tracking_numbers = trackingNumbers

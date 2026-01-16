@@ -885,16 +885,21 @@ async function handleSearchOrders() {
         ` : ''}
         ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
           <div class="tracking-status">
-            ${order.trackingStatuses && order.trackingStatuses.length > 0
-              ? `<span class="tracking-status-badge ${order.trackingStatuses[0].replace(/_/g, '-')}">${order.trackingStatuses[0].replace(/_/g, ' ')}</span>`
-              : '<span class="tracking-status-badge confirmed">Shipped</span>'
-            }
-            <span>
-              ${order.trackingUrls && order.trackingUrls.length > 0
-                ? order.trackingNumbers.map((num: string, i: number) => `<a href="${order.trackingUrls[i] || '#'}" target="_blank" class="tracking-link">${order.trackingCompanies?.[i] || ''} ${num}</a>`).join(', ')
-                : order.trackingNumbers.join(', ')
+            <div class="tracking-status-header">
+              <span class="tracking-status-label">Tracking</span>
+              ${order.trackingStatuses && order.trackingStatuses.length > 0
+                ? `<span class="tracking-status-badge ${order.trackingStatuses[0].replace(/_/g, '-')}">${order.trackingStatuses[0].replace(/_/g, ' ')}</span>`
+                : '<span class="tracking-status-badge confirmed">Shipped</span>'
               }
-            </span>
+            </div>
+            <div class="tracking-info">
+              ${order.trackingNumbers.map((num: string, i: number) => `
+                <div class="tracking-number-row">
+                  <span>${order.trackingCompanies?.[i] || 'Carrier'}: <strong>${num}</strong></span>
+                  ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn">Track →</a>` : ''}
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
         ${order.shippingAddress ? `
@@ -911,21 +916,22 @@ async function handleSearchOrders() {
           </div>
         ` : ''}
         ${order.events && order.events.length > 0 ? `
-          <div class="order-timeline">
-            <div class="order-timeline-title">Timeline</div>
+          <details class="order-timeline">
+            <summary class="order-timeline-title">Timeline (${order.events.length} events)</summary>
             <div class="timeline-events">
-              ${order.events.slice(0, 10).map((event: { created_at: string; message: string; verb: string; body: string | null }) => `
-                <div class="timeline-event ${event.verb === 'comment' ? 'comment' : ''} ${event.verb === 'fulfillment_success' ? 'fulfillment' : ''}">
+              ${order.events.slice(0, 15).map((event: { created_at: string; message: string; verb: string; body: string | null; author: string | null }) => `
+                <div class="timeline-event ${event.verb === 'comment' || event.verb === 'note_added' || event.body ? 'comment' : ''} ${event.verb === 'fulfillment_success' ? 'fulfillment' : ''}">
                   <div class="timeline-dot"></div>
                   <div class="timeline-content">
                     <div class="timeline-message">${event.message}</div>
+                    ${event.author ? `<div class="timeline-author">by ${event.author}</div>` : ''}
                     ${event.body ? `<div class="timeline-comment">${event.body}</div>` : ''}
                     <div class="timeline-date">${new Date(event.created_at).toLocaleString()}</div>
                   </div>
                 </div>
               `).join('')}
             </div>
-          </div>
+          </details>
         ` : ''}
         <div class="order-actions">
           <a href="${order.adminUrl}" target="_blank" class="order-link-btn">View in Shopify</a>
