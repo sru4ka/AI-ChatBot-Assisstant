@@ -532,7 +532,7 @@ www.example.com"
             <div className="setting-group" style={{ marginTop: 20 }}>
               <label style={{ fontWeight: 600, marginBottom: 8, display: 'block' }}>Custom AI Instructions</label>
               <p style={{ fontSize: 11, color: '#666', marginBottom: 8 }}>
-                Add extra instructions for the AI (e.g., "Always mention our 30-day return policy")
+                Add business info the AI will use only when relevant (e.g., "Products are made in China", "We offer 30-day returns")
               </p>
               <textarea
                 value={settings.customPrompt}
