@@ -95,7 +95,7 @@
 
 /* Dropdown menu */
 .freshdesk-ai-dropdown-menu {
-  width: 280px;
+  width: 380px;
   background: white;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
@@ -468,7 +468,7 @@
 /* Order Info Styles */
 .order-info-content {
   padding: 16px;
-  max-height: 350px;
+  max-height: 450px;
   overflow-y: auto;
 }
 
@@ -676,4 +676,133 @@
 
 .order-link-btn:hover {
   background: #264fab;
+}
+
+/* Tracking Status */
+.tracking-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: #f0f9ff;
+  border-radius: 6px;
+  border-left: 3px solid #2563eb;
+}
+
+.tracking-status-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  text-transform: capitalize;
+}
+
+.tracking-status-badge.delivered {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.tracking-status-badge.in_transit,
+.tracking-status-badge.in-transit {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.tracking-status-badge.out_for_delivery,
+.tracking-status-badge.out-for-delivery {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.tracking-status-badge.attempted_delivery,
+.tracking-status-badge.attempted-delivery {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.tracking-status-badge.label_created,
+.tracking-status-badge.label-created,
+.tracking-status-badge.confirmed {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.tracking-status-badge.failure {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Order Timeline */
+.order-timeline {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.order-timeline-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.timeline-events {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.timeline-event {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #e5e7eb;
+  font-size: 11px;
+}
+
+.timeline-event:last-child {
+  border-bottom: none;
+}
+
+.timeline-dot {
+  width: 8px;
+  height: 8px;
+  background: #9ca3af;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.timeline-event.comment .timeline-dot {
+  background: #f97316;
+}
+
+.timeline-event.fulfillment .timeline-dot {
+  background: #10b981;
+}
+
+.timeline-content {
+  flex: 1;
+}
+
+.timeline-message {
+  color: #374151;
+  line-height: 1.4;
+}
+
+.timeline-date {
+  color: #9ca3af;
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.timeline-comment {
+  background: #fff7ed;
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-top: 4px;
+  border-left: 2px solid #f97316;
+  color: #9a3412;
+  font-style: italic;
 }

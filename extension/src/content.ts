@@ -860,8 +860,10 @@ async function handleSearchOrders() {
       trackingNumbers: string[]
       trackingUrls: string[]
       trackingCompanies: string[]
+      trackingStatuses: string[]
       note: string | null
       noteAttributes: { name: string; value: string }[] | null
+      events: { id: number; created_at: string; message: string; subject_type: string; verb: string; author: string | null; body: string | null }[]
       items: { title: string; quantity: number; price: string }[]
       shippingAddress: { city: string; province: string; country: string } | null
       adminUrl: string
@@ -882,14 +884,19 @@ async function handleSearchOrders() {
           </div>
         ` : ''}
         ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
-          <div class="order-tracking">
-            <strong>Tracking:</strong>
-            ${order.trackingUrls && order.trackingUrls.length > 0
-              ? order.trackingNumbers.map((num: string, i: number) => `<a href="${order.trackingUrls[i] || '#'}" target="_blank" class="tracking-link">${order.trackingCompanies?.[i] || ''} ${num}</a>`).join(', ')
-              : order.trackingNumbers.join(', ')
+          <div class="tracking-status">
+            ${order.trackingStatuses && order.trackingStatuses.length > 0
+              ? `<span class="tracking-status-badge ${order.trackingStatuses[0].replace(/_/g, '-')}">${order.trackingStatuses[0].replace(/_/g, ' ')}</span>`
+              : '<span class="tracking-status-badge confirmed">Shipped</span>'
             }
+            <span>
+              ${order.trackingUrls && order.trackingUrls.length > 0
+                ? order.trackingNumbers.map((num: string, i: number) => `<a href="${order.trackingUrls[i] || '#'}" target="_blank" class="tracking-link">${order.trackingCompanies?.[i] || ''} ${num}</a>`).join(', ')
+                : order.trackingNumbers.join(', ')
+              }
+            </span>
           </div>
-        ` : '<div class="order-tracking"><em>No tracking info available</em></div>'}
+        ` : ''}
         ${order.shippingAddress ? `
           <div class="order-shipping">Ships to: ${order.shippingAddress.city}, ${order.shippingAddress.province}, ${order.shippingAddress.country}</div>
         ` : ''}
@@ -901,6 +908,23 @@ async function handleSearchOrders() {
             ${order.noteAttributes.map((attr: { name: string; value: string }) => `
               <div class="order-note"><strong>${attr.name}:</strong> ${attr.value}</div>
             `).join('')}
+          </div>
+        ` : ''}
+        ${order.events && order.events.length > 0 ? `
+          <div class="order-timeline">
+            <div class="order-timeline-title">Timeline</div>
+            <div class="timeline-events">
+              ${order.events.slice(0, 10).map((event: { created_at: string; message: string; verb: string; body: string | null }) => `
+                <div class="timeline-event ${event.verb === 'comment' ? 'comment' : ''} ${event.verb === 'fulfillment_success' ? 'fulfillment' : ''}">
+                  <div class="timeline-dot"></div>
+                  <div class="timeline-content">
+                    <div class="timeline-message">${event.message}</div>
+                    ${event.body ? `<div class="timeline-comment">${event.body}</div>` : ''}
+                    <div class="timeline-date">${new Date(event.created_at).toLocaleString()}</div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
         <div class="order-actions">

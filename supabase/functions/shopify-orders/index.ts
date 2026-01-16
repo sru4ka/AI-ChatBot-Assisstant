@@ -26,8 +26,20 @@ interface ShopifyOrder {
   tracking_numbers: string[]
   tracking_urls: string[]
   tracking_companies: string[]
+  tracking_statuses: string[]
   note: string | null
   note_attributes: { name: string; value: string }[]
+  events: ShopifyEvent[]
+}
+
+interface ShopifyEvent {
+  id: number
+  created_at: string
+  message: string
+  subject_type: string
+  verb: string
+  author: string | null
+  body: string | null
 }
 
 interface ShopifyLineItem {
@@ -103,13 +115,15 @@ async function searchOrders(
       const data = await response.json()
 
       if (data.orders && data.orders.length > 0) {
-        // Get tracking info for each order
+        // Get tracking info and events for each order
         for (const order of data.orders) {
           const trackingNumbers: string[] = []
           const trackingUrls: string[] = []
           const trackingCompanies: string[] = []
+          const trackingStatuses: string[] = []
+          let events: ShopifyEvent[] = []
 
-          // Fetch fulfillments to get tracking details
+          // Fetch fulfillments to get tracking details and status
           try {
             const fulfillmentsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/fulfillments.json`
             const fulfillmentsResponse = await fetch(fulfillmentsUrl, {
@@ -131,15 +145,49 @@ async function searchOrders(
                 if (fulfillment.tracking_company) {
                   trackingCompanies.push(fulfillment.tracking_company)
                 }
+                // Get shipment status (delivered, in_transit, out_for_delivery, etc.)
+                if (fulfillment.shipment_status) {
+                  trackingStatuses.push(fulfillment.shipment_status)
+                }
               }
             }
           } catch (e) {
             console.warn('Error fetching fulfillments:', e)
           }
 
+          // Fetch order events (timeline with comments)
+          try {
+            const eventsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/events.json`
+            const eventsResponse = await fetch(eventsUrl, {
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+              },
+            })
+
+            if (eventsResponse.ok) {
+              const eventsData = await eventsResponse.json()
+              events = (eventsData.events || [])
+                .slice(0, 15) // Limit to 15 most recent events
+                .map((e: { id: number; created_at: string; message: string; subject_type: string; verb: string; author?: string; body?: string }) => ({
+                  id: e.id,
+                  created_at: e.created_at,
+                  message: e.message,
+                  subject_type: e.subject_type,
+                  verb: e.verb,
+                  author: e.author || null,
+                  body: e.body || null,
+                }))
+            }
+          } catch (e) {
+            console.warn('Error fetching events:', e)
+          }
+
           order.tracking_numbers = trackingNumbers
           order.tracking_urls = trackingUrls
           order.tracking_companies = trackingCompanies
+          order.tracking_statuses = trackingStatuses
+          order.events = events
         }
 
         allOrders.push(...data.orders)
@@ -277,8 +325,10 @@ Deno.serve(async (req: Request) => {
           trackingNumbers: o.tracking_numbers,
           trackingUrls: o.tracking_urls,
           trackingCompanies: o.tracking_companies,
+          trackingStatuses: o.tracking_statuses,
           note: o.note,
           noteAttributes: o.note_attributes,
+          events: o.events,
           itemCount: o.line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0,
           items: o.line_items?.slice(0, 5).map(item => ({
             title: item.title,
