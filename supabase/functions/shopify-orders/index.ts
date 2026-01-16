@@ -161,17 +161,24 @@ async function searchOrders(
             const graphqlQuery = `
               query getOrderTimeline($id: ID!) {
                 order(id: $id) {
-                  events(first: 20, sortKey: CREATED_AT, reverse: true) {
+                  events(first: 30, sortKey: CREATED_AT, reverse: true) {
                     edges {
                       node {
+                        __typename
                         id
                         createdAt
                         message
+                        attributeToApp
+                        attributeToUser
+                        criticalAlert
                         ... on CommentEvent {
                           rawMessage
                           author {
                             name
                           }
+                        }
+                        ... on BasicEvent {
+                          appTitle
                         }
                       }
                     }
@@ -194,16 +201,24 @@ async function searchOrders(
 
             if (graphqlResponse.ok) {
               const graphqlData = await graphqlResponse.json()
+              console.log('GraphQL response for order', order.id, ':', JSON.stringify(graphqlData))
+
+              if (graphqlData.errors) {
+                console.warn('GraphQL errors:', graphqlData.errors)
+              }
+
               const timelineEvents = graphqlData.data?.order?.events?.edges || []
-              events = timelineEvents.map((edge: { node: { id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string } } }) => ({
+              events = timelineEvents.map((edge: { node: { __typename: string; id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string }; attributeToUser?: boolean } }) => ({
                 id: edge.node.id,
                 created_at: edge.node.createdAt,
                 message: edge.node.message,
                 subject_type: 'Order',
-                verb: edge.node.rawMessage ? 'comment' : 'event',
+                verb: edge.node.__typename === 'CommentEvent' ? 'comment' : 'event',
                 author: edge.node.author?.name || null,
                 body: edge.node.rawMessage || null,
               }))
+
+              console.log('Parsed events:', events.length, 'comments:', events.filter((e: ShopifyEvent) => e.verb === 'comment').length)
             }
           } catch (e) {
             console.warn('Error fetching timeline events:', e)

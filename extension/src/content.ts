@@ -896,7 +896,7 @@ async function handleSearchOrders() {
               ${order.trackingNumbers.map((num: string, i: number) => `
                 <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">
                   <span>${order.trackingCompanies?.[i] || 'Carrier'}: <strong>${num}</strong></span>
-                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">Get Status</button>
+                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">Refresh</button>
                   ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
                 </div>
                 <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
@@ -944,8 +944,9 @@ async function handleSearchOrders() {
     resultsEl.classList.remove('hidden')
     showToast(`Found ${data.orders.length} order(s)`, 'success')
 
-    // Add tracking status button handlers
-    resultsEl.querySelectorAll('.get-tracking-status').forEach(btn => {
+    // Add tracking status button handlers AND auto-fetch tracking status
+    const trackingButtons = resultsEl.querySelectorAll('.get-tracking-status')
+    trackingButtons.forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement
         const trackingNumber = target.dataset.tracking
@@ -954,6 +955,15 @@ async function handleSearchOrders() {
           await handleGetTrackingStatus(trackingNumber, carrier || '', authData)
         }
       })
+    })
+
+    // Auto-fetch tracking status for all tracking numbers
+    trackingButtons.forEach(async (btn) => {
+      const trackingNumber = (btn as HTMLElement).dataset.tracking
+      const carrier = (btn as HTMLElement).dataset.carrier
+      if (trackingNumber) {
+        await handleGetTrackingStatus(trackingNumber, carrier || '', authData)
+      }
     })
   } catch (error) {
     console.error('Error searching orders:', error)
@@ -972,7 +982,7 @@ async function handleSearchOrders() {
   }
 }
 
-// Fetch detailed tracking status from 17track
+// Fetch detailed tracking status from TrackingMore
 async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }) {
   const detailsId = `tracking-details-${trackingNumber.replace(/[^a-zA-Z0-9]/g, '')}`
   const detailsEl = document.getElementById(detailsId)
@@ -1007,7 +1017,6 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
       detailsEl.innerHTML = `
         <div class="tracking-error">
           <p>${data.error || 'Could not fetch tracking status'}</p>
-          ${data.status === 'not_configured' ? '<small>Add 17track API key in admin dashboard settings</small>' : ''}
         </div>
       `
       return
