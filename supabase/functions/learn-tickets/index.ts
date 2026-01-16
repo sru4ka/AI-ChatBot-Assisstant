@@ -57,14 +57,30 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
 
     console.log(`Searching for tickets with status ${status}...`)
 
-    // Search with different date ranges to get past the 300 limit per query
+    // Search with quarterly date ranges to get past the 300 limit per query
+    // More granular ranges = more tickets found
     const dateRanges = [
       '', // No date filter (gets most recent)
+      // 2025
       "created_at:>'2025-01-01'",
-      "created_at:>'2024-01-01' AND created_at:<'2025-01-01'",
-      "created_at:>'2023-01-01' AND created_at:<'2024-01-01'",
-      "created_at:>'2022-01-01' AND created_at:<'2023-01-01'",
+      // 2024 quarterly
+      "created_at:>'2024-10-01' AND created_at:<'2025-01-01'",
+      "created_at:>'2024-07-01' AND created_at:<'2024-10-01'",
+      "created_at:>'2024-04-01' AND created_at:<'2024-07-01'",
+      "created_at:>'2024-01-01' AND created_at:<'2024-04-01'",
+      // 2023 quarterly
+      "created_at:>'2023-10-01' AND created_at:<'2024-01-01'",
+      "created_at:>'2023-07-01' AND created_at:<'2023-10-01'",
+      "created_at:>'2023-04-01' AND created_at:<'2023-07-01'",
+      "created_at:>'2023-01-01' AND created_at:<'2023-04-01'",
+      // 2022 quarterly
+      "created_at:>'2022-10-01' AND created_at:<'2023-01-01'",
+      "created_at:>'2022-07-01' AND created_at:<'2022-10-01'",
+      "created_at:>'2022-04-01' AND created_at:<'2022-07-01'",
+      "created_at:>'2022-01-01' AND created_at:<'2022-04-01'",
+      // Older
       "created_at:>'2021-01-01' AND created_at:<'2022-01-01'",
+      "created_at:>'2020-01-01' AND created_at:<'2021-01-01'",
     ]
 
     for (const dateFilter of dateRanges) {
@@ -107,8 +123,8 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
           console.log(`Search status:${status} ${dateFilter || '(recent)'} page ${page}: +${newTickets.length} (total: ${tickets.length})`)
           page++
 
-          // Small delay for rate limiting
-          await new Promise(resolve => setTimeout(resolve, 50))
+          // Minimal delay for rate limiting
+          await new Promise(resolve => setTimeout(resolve, 30))
         } catch (err) {
           console.error(`Error searching status ${status}:`, err)
           break
@@ -155,7 +171,7 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
           console.log(`Standard API page ${page}: +${newTickets.length} (total: ${tickets.length})`)
         }
 
-        await new Promise(resolve => setTimeout(resolve, 50))
+        await new Promise(resolve => setTimeout(resolve, 30))
       } catch (err) {
         console.error(`Error fetching page ${page}:`, err)
         break
@@ -307,7 +323,7 @@ Deno.serve(async (req: Request) => {
     // PHASE 2: Fetch conversations in parallel batches
     const learningDocs: string[] = []
     let processedCount = 0
-    const batchSize = 15 // Process 15 tickets at a time
+    const batchSize = 25 // Process 25 tickets at a time for faster processing
 
     for (let i = 0; i < tickets.length && !isTimeRunningOut(); i += batchSize) {
       const batch = tickets.slice(i, i + batchSize)
@@ -340,9 +356,9 @@ Deno.serve(async (req: Request) => {
         processedCount++
       }
 
-      // Rate limiting delay
+      // Minimal rate limiting delay
       if (i + batchSize < tickets.length && !isTimeRunningOut()) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+        await new Promise(resolve => setTimeout(resolve, 50))
       }
     }
 
