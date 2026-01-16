@@ -894,10 +894,12 @@ async function handleSearchOrders() {
             </div>
             <div class="tracking-info">
               ${order.trackingNumbers.map((num: string, i: number) => `
-                <div class="tracking-number-row">
+                <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">
                   <span>${order.trackingCompanies?.[i] || 'Carrier'}: <strong>${num}</strong></span>
-                  ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn">Track →</a>` : ''}
+                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">Get Status</button>
+                  ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
                 </div>
+                <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
               `).join('')}
             </div>
           </div>
@@ -941,6 +943,18 @@ async function handleSearchOrders() {
 
     resultsEl.classList.remove('hidden')
     showToast(`Found ${data.orders.length} order(s)`, 'success')
+
+    // Add tracking status button handlers
+    resultsEl.querySelectorAll('.get-tracking-status').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const target = e.target as HTMLElement
+        const trackingNumber = target.dataset.tracking
+        const carrier = target.dataset.carrier
+        if (trackingNumber) {
+          await handleGetTrackingStatus(trackingNumber, carrier || '', authData)
+        }
+      })
+    })
   } catch (error) {
     console.error('Error searching orders:', error)
     resultsEl.innerHTML = `
@@ -955,6 +969,94 @@ async function handleSearchOrders() {
     document.getElementById('freshdesk-ai-retry-search')?.addEventListener('click', handleSearchOrders)
   } finally {
     loadingEl.classList.add('hidden')
+  }
+}
+
+// Fetch detailed tracking status from 17track
+async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }) {
+  const detailsId = `tracking-details-${trackingNumber.replace(/[^a-zA-Z0-9]/g, '')}`
+  const detailsEl = document.getElementById(detailsId)
+  const btn = document.querySelector(`button[data-tracking="${trackingNumber}"]`) as HTMLButtonElement
+
+  if (!detailsEl) return
+
+  // Show loading state
+  btn.disabled = true
+  btn.textContent = 'Loading...'
+  detailsEl.classList.remove('hidden')
+  detailsEl.innerHTML = '<div class="tracking-loading">Fetching tracking status...</div>'
+
+  try {
+    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/track-package', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authData.access_token}`,
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+      },
+      body: JSON.stringify({
+        businessId: authData.user?.id,
+        trackingNumber,
+        carrier: carrier || undefined,
+      }),
+    })
+
+    const data = await response.json()
+
+    if (!data.success) {
+      detailsEl.innerHTML = `
+        <div class="tracking-error">
+          <p>${data.error || 'Could not fetch tracking status'}</p>
+          ${data.status === 'not_configured' ? '<small>Add 17track API key in admin dashboard settings</small>' : ''}
+        </div>
+      `
+      return
+    }
+
+    // Render tracking details
+    detailsEl.innerHTML = `
+      <div class="tracking-details-content">
+        <div class="tracking-details-header">
+          <span class="tracking-status-badge ${data.status}">${data.statusDescription}</span>
+          ${data.carrier ? `<span class="tracking-carrier">${data.carrier}</span>` : ''}
+        </div>
+        ${data.estimatedDelivery ? `
+          <div class="tracking-eta">
+            <strong>Est. Delivery:</strong> ${new Date(data.estimatedDelivery).toLocaleDateString()}
+          </div>
+        ` : ''}
+        ${data.lastUpdate ? `
+          <div class="tracking-last-update">
+            <strong>Last Update:</strong> ${new Date(data.lastUpdate).toLocaleString()}
+          </div>
+        ` : ''}
+        ${data.events && data.events.length > 0 ? `
+          <details class="tracking-events-details" open>
+            <summary>Tracking History (${data.events.length} events)</summary>
+            <div class="tracking-events-list">
+              ${data.events.slice(0, 10).map((event: { time: string; location: string; description: string }) => `
+                <div class="tracking-event-item">
+                  <div class="tracking-event-time">${event.time ? new Date(event.time).toLocaleString() : ''}</div>
+                  <div class="tracking-event-desc">${event.description}</div>
+                  ${event.location ? `<div class="tracking-event-location">${event.location}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        ` : '<p class="tracking-no-events">No tracking events available yet</p>'}
+      </div>
+    `
+
+    btn.textContent = 'Refresh'
+  } catch (error) {
+    console.error('Error fetching tracking:', error)
+    detailsEl.innerHTML = `
+      <div class="tracking-error">
+        <p>Error: ${error instanceof Error ? error.message : 'Failed to fetch tracking'}</p>
+      </div>
+    `
+  } finally {
+    btn.disabled = false
   }
 }
 
