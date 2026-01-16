@@ -861,6 +861,7 @@ async function handleSearchOrders() {
       trackingUrls: string[]
       trackingCompanies: string[]
       note: string | null
+      noteAttributes: { name: string; value: string }[] | null
       items: { title: string; quantity: number; price: string }[]
       shippingAddress: { city: string; province: string; country: string } | null
       adminUrl: string
@@ -893,7 +894,14 @@ async function handleSearchOrders() {
           <div class="order-shipping">Ships to: ${order.shippingAddress.city}, ${order.shippingAddress.province}, ${order.shippingAddress.country}</div>
         ` : ''}
         ${order.note ? `
-          <div class="order-note"><strong>Note:</strong> ${order.note}</div>
+          <div class="order-note"><strong>Order Note:</strong> ${order.note}</div>
+        ` : ''}
+        ${order.noteAttributes && order.noteAttributes.length > 0 ? `
+          <div class="order-note-attributes">
+            ${order.noteAttributes.map((attr: { name: string; value: string }) => `
+              <div class="order-note"><strong>${attr.name}:</strong> ${attr.value}</div>
+            `).join('')}
+          </div>
         ` : ''}
         <div class="order-actions">
           <a href="${order.adminUrl}" target="_blank" class="order-link-btn">View in Shopify</a>
