@@ -58,11 +58,15 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
     console.log(`Searching for tickets with status ${status}...`)
 
     // Search with quarterly date ranges to get past the 300 limit per query
-    // More granular ranges = more tickets found
+    // Ordered from NEWEST to OLDEST so we get most recent tickets first
     const dateRanges = [
-      '', // No date filter (gets most recent)
-      // 2025
-      "created_at:>'2025-01-01'",
+      // 2026 (current year)
+      "created_at:>'2026-01-01'",
+      // 2025 quarterly (newest first)
+      "created_at:>'2025-10-01' AND created_at:<'2026-01-01'",
+      "created_at:>'2025-07-01' AND created_at:<'2025-10-01'",
+      "created_at:>'2025-04-01' AND created_at:<'2025-07-01'",
+      "created_at:>'2025-01-01' AND created_at:<'2025-04-01'",
       // 2024 quarterly
       "created_at:>'2024-10-01' AND created_at:<'2025-01-01'",
       "created_at:>'2024-07-01' AND created_at:<'2024-10-01'",
@@ -78,7 +82,7 @@ async function fetchTickets(domain: string, apiKey: string, count: number): Prom
       "created_at:>'2022-07-01' AND created_at:<'2022-10-01'",
       "created_at:>'2022-04-01' AND created_at:<'2022-07-01'",
       "created_at:>'2022-01-01' AND created_at:<'2022-04-01'",
-      // Older
+      // Older years
       "created_at:>'2021-01-01' AND created_at:<'2022-01-01'",
       "created_at:>'2020-01-01' AND created_at:<'2021-01-01'",
     ]
