@@ -1,5 +1,3 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -139,30 +137,14 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-    )
+    // Use global TrackingMore API key from environment variable
+    const trackingApiKey = Deno.env.get('TRACKINGMORE_API_KEY')
 
-    // Get business with tracking API key
-    const { data: business, error: businessError } = await supabase
-      .from('businesses')
-      .select('id, tracking_api_key')
-      .eq('id', businessId)
-      .single()
-
-    if (businessError || !business) {
-      return new Response(
-        JSON.stringify({ error: 'Business not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (!business.tracking_api_key) {
+    if (!trackingApiKey) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Tracking API not configured. Add TrackingMore API key in settings.',
+          error: 'Tracking API not configured on server.',
           trackingNumber,
           carrier: null,
           status: 'not_configured',
@@ -200,7 +182,7 @@ Deno.serve(async (req: Request) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Tracking-Api-Key': business.tracking_api_key,
+        'Tracking-Api-Key': trackingApiKey,
       },
       body: JSON.stringify(requestBody),
     })
