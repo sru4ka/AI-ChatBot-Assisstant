@@ -287,15 +287,60 @@ export default function Settings({ business, onUpdate }: SettingsProps) {
 
           <details style={{ fontSize: '0.85rem', color: '#666' }}>
             <summary style={{ cursor: 'pointer', color: '#276749', fontWeight: '500' }}>
-              How to create Access Token
+              📋 Step-by-Step Setup Instructions (for Store Owner/Developer)
             </summary>
-            <ol style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem', lineHeight: '1.8' }}>
-              <li>Shopify Admin → <strong>Settings</strong> → <strong>Apps and sales channels</strong></li>
-              <li>Click <strong>"Develop apps"</strong></li>
-              <li>Create app named "Freshdesk AI"</li>
-              <li>Configure Admin API scopes: <code>read_orders</code>, <code>read_customers</code>, <code>read_fulfillments</code></li>
-              <li>Install app → <strong>"Reveal token once"</strong></li>
-            </ol>
+            <div style={{ margin: '0.75rem 0 0 0', lineHeight: '1.8' }}>
+              <p style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#276749' }}>
+                ⚠️ Important: Only the store OWNER can do this. Staff accounts cannot enable custom apps.
+              </p>
+
+              <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.25rem' }}>Step 1: Enable Custom App Development</p>
+              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
+                <li>Go to Shopify Admin → <strong>Settings</strong> (bottom left)</li>
+                <li>Click <strong>"Apps and sales channels"</strong></li>
+                <li>Click the <strong>"Develop apps"</strong> button (top right)</li>
+                <li>Click <strong>"Allow custom app development"</strong></li>
+                <li>Read the warning and click <strong>"Allow custom app development"</strong> to confirm</li>
+              </ol>
+
+              <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.25rem' }}>Step 2: Create the App</p>
+              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
+                <li>After enabling, click <strong>"Create an app"</strong></li>
+                <li>Enter app name: <code>Freshdesk AI Assistant</code></li>
+                <li>Click <strong>"Create app"</strong></li>
+              </ol>
+
+              <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.25rem' }}>Step 3: Configure API Permissions</p>
+              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
+                <li>Click the <strong>"Configuration"</strong> tab</li>
+                <li>Under "Admin API integration", click <strong>"Configure"</strong></li>
+                <li>Search and select these scopes:
+                  <ul style={{ margin: '0.25rem 0', paddingLeft: '1rem' }}>
+                    <li><code>read_orders</code> - to look up customer orders</li>
+                    <li><code>read_customers</code> - to find orders by email</li>
+                    <li><code>read_fulfillments</code> - to get tracking info</li>
+                  </ul>
+                </li>
+                <li>Click <strong>"Save"</strong></li>
+              </ol>
+
+              <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.25rem' }}>Step 4: Install the App & Get Token</p>
+              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
+                <li>Click the <strong>"API credentials"</strong> tab</li>
+                <li>Click <strong>"Install app"</strong></li>
+                <li>Click <strong>"Install"</strong> in the popup</li>
+                <li>Click <strong>"Reveal token once"</strong> under Admin API access token</li>
+                <li><strong>Copy the token immediately</strong> (starts with <code>shpat_</code>)</li>
+                <li>⚠️ <strong>Save it somewhere safe</strong> - you can only see it once!</li>
+              </ol>
+
+              <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.25rem' }}>Step 5: Enter Details Here</p>
+              <ol style={{ margin: '0', paddingLeft: '1.25rem' }}>
+                <li><strong>Shopify Store Domain:</strong> your-store.myshopify.com (from browser URL)</li>
+                <li><strong>Shopify Access Token:</strong> paste the <code>shpat_...</code> token</li>
+                <li>Click <strong>"Save Settings"</strong></li>
+              </ol>
+            </div>
           </details>
         </CollapsibleSection>
 
