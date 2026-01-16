@@ -30,76 +30,91 @@ interface TrackingResult {
   error?: string
 }
 
-// Map 17track status codes to readable status
-const statusMap: Record<number, { status: string; description: string }> = {
-  0: { status: 'not_found', description: 'Not Found' },
-  10: { status: 'in_transit', description: 'In Transit' },
-  20: { status: 'expired', description: 'Expired' },
-  30: { status: 'pickup', description: 'Ready for Pickup' },
-  35: { status: 'undelivered', description: 'Undelivered' },
-  40: { status: 'delivered', description: 'Delivered' },
-  50: { status: 'alert', description: 'Alert' },
+// Map TrackingMore status to readable descriptions
+const statusMap: Record<string, string> = {
+  'pending': 'Pending',
+  'notfound': 'Not Found',
+  'transit': 'In Transit',
+  'pickup': 'Ready for Pickup',
+  'delivered': 'Delivered',
+  'expired': 'Expired',
+  'undelivered': 'Undelivered',
+  'exception': 'Exception',
+  'inforeceived': 'Info Received',
 }
 
-// Map carrier codes
-const carrierCodes: Record<string, number> = {
-  'usps': 21051,
-  'ups': 100002,
-  'fedex': 100003,
-  'dhl': 100001,
-  'china-post': 3011,
-  'china-ems': 3001,
-  'yanwen': 190012,
-  'yunexpress': 190111,
-  '4px': 190233,
-  'cainiao': 2021,
-  'amazon': 100143,
+// Map carrier names to TrackingMore carrier codes
+const carrierCodes: Record<string, string> = {
+  'usps': 'usps',
+  'ups': 'ups',
+  'fedex': 'fedex',
+  'dhl': 'dhl',
+  'china-post': 'china-post',
+  'china-ems': 'china-ems',
+  'yanwen': 'yanwen',
+  'yunexpress': 'yunexpress',
+  'yun express': 'yunexpress',
+  '4px': '4px',
+  'cainiao': 'cainiao',
+  'amazon': 'amazon-fba-usa',
+  'aliexpress': 'aliexpress-standard-shipping',
 }
 
 /**
  * Try to detect carrier from tracking number format
+ * Returns TrackingMore carrier code
  */
-function detectCarrier(trackingNumber: string): number | null {
+function detectCarrier(trackingNumber: string): string | null {
   const num = trackingNumber.toUpperCase().replace(/\s/g, '')
 
   // USPS patterns
-  if (/^(94|93|92|91|94)\d{20,}$/.test(num) ||
+  if (/^(94|93|92|91)\d{20,}$/.test(num) ||
       /^[A-Z]{2}\d{9}US$/.test(num)) {
-    return carrierCodes['usps']
+    return 'usps'
   }
 
   // UPS patterns
   if (/^1Z[A-Z0-9]{16}$/.test(num) ||
-      /^T\d{10}$/.test(num) ||
-      /^\d{26}$/.test(num)) {
-    return carrierCodes['ups']
+      /^T\d{10}$/.test(num)) {
+    return 'ups'
   }
 
   // FedEx patterns
-  if (/^\d{12,15}$/.test(num) ||
-      /^\d{20,22}$/.test(num)) {
-    return carrierCodes['fedex']
+  if (/^\d{12}$/.test(num) ||
+      /^\d{15}$/.test(num) ||
+      /^\d{20}$/.test(num)) {
+    return 'fedex'
   }
 
   // DHL patterns
-  if (/^\d{10,11}$/.test(num) ||
+  if (/^\d{10}$/.test(num) ||
       /^[A-Z]{3}\d{7}$/.test(num)) {
-    return carrierCodes['dhl']
+    return 'dhl'
   }
 
-  // China Post / YunExpress patterns
-  if (/^[A-Z]{2}\d{9}CN$/.test(num) ||
-      /^YT\d{16}$/.test(num)) {
-    return carrierCodes['yunexpress']
+  // China Post / China EMS patterns
+  if (/^[A-Z]{2}\d{9}CN$/.test(num)) {
+    return 'china-ems'
+  }
+
+  // YunExpress patterns
+  if (/^YT\d{16}$/.test(num)) {
+    return 'yunexpress'
   }
 
   // 4PX patterns
   if (/^4PX\d+$/.test(num) ||
       /^UUSC\d+$/.test(num)) {
-    return carrierCodes['4px']
+    return '4px'
   }
 
-  return null // Let 17track auto-detect
+  // Cainiao patterns
+  if (/^LP\d+$/.test(num) ||
+      /^CAINIAO\d+$/.test(num)) {
+    return 'cainiao'
+  }
+
+  return null // Let TrackingMore auto-detect
 }
 
 Deno.serve(async (req: Request) => {
@@ -147,7 +162,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Tracking API not configured. Add 17track API key in settings.',
+          error: 'Tracking API not configured. Add TrackingMore API key in settings.',
           trackingNumber,
           carrier: null,
           status: 'not_configured',
@@ -164,56 +179,34 @@ Deno.serve(async (req: Request) => {
     const cleanTrackingNumber = trackingNumber.trim().replace(/\s/g, '')
 
     // Detect or use provided carrier
-    let carrierCode: number | null = null
-    if (carrier && carrierCodes[carrier.toLowerCase()]) {
-      carrierCode = carrierCodes[carrier.toLowerCase()]
+    let carrierCode: string | null = null
+    if (carrier) {
+      const lowerCarrier = carrier.toLowerCase().replace(/\s+/g, '-')
+      carrierCode = carrierCodes[lowerCarrier] || lowerCarrier
     } else {
       carrierCode = detectCarrier(cleanTrackingNumber)
     }
 
-    // Call 17track API
-    // First, register the tracking number
-    const registerResponse = await fetch('https://api.17track.net/track/v2.2/register', {
-      method: 'POST',
-      headers: {
-        '17token': business.tracking_api_key,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify([
-        {
-          number: cleanTrackingNumber,
-          carrier: carrierCode,
-        }
-      ]),
-    })
-
-    if (!registerResponse.ok) {
-      console.error('17track register failed:', registerResponse.status)
+    // Build request body for TrackingMore realtime API
+    const requestBody: { tracking_number: string; carrier_code?: string } = {
+      tracking_number: cleanTrackingNumber,
+    }
+    if (carrierCode) {
+      requestBody.carrier_code = carrierCode
     }
 
-    // Wait a moment for registration to process
-    await new Promise(resolve => setTimeout(resolve, 500))
-
-    // Get tracking info
-    const trackResponse = await fetch('https://api.17track.net/track/v2.2/gettrackinfo', {
+    // Call TrackingMore realtime API
+    const trackResponse = await fetch('https://api.trackingmore.com/v3/trackings/realtime', {
       method: 'POST',
       headers: {
-        '17token': business.tracking_api_key,
         'Content-Type': 'application/json',
+        'Tracking-Api-Key': business.tracking_api_key,
       },
-      body: JSON.stringify([
-        {
-          number: cleanTrackingNumber,
-        }
-      ]),
+      body: JSON.stringify(requestBody),
     })
-
-    if (!trackResponse.ok) {
-      throw new Error(`17track API error: ${trackResponse.status}`)
-    }
 
     const trackData = await trackResponse.json()
-    console.log('17track response:', JSON.stringify(trackData))
+    console.log('TrackingMore response:', JSON.stringify(trackData))
 
     // Parse the response
     const result: TrackingResult = {
@@ -227,46 +220,51 @@ Deno.serve(async (req: Request) => {
       events: [],
     }
 
-    if (trackData.data?.accepted && trackData.data.accepted.length > 0) {
-      const trackInfo = trackData.data.accepted[0]
-      const track = trackInfo.track
-
-      if (track) {
-        // Get carrier info
-        if (track.b) {
-          result.carrier = track.b
-        }
-
-        // Get status
-        const statusCode = track.e || 0
-        const statusInfo = statusMap[statusCode] || { status: 'unknown', description: 'Unknown' }
-        result.status = statusInfo.status
-        result.statusDescription = statusInfo.description
-
-        // Get last update time
-        if (track.z0?.a) {
-          result.lastUpdate = track.z0.a
-        }
-
-        // Get estimated delivery (if available)
-        if (track.w1) {
-          result.estimatedDelivery = track.w1
-        }
-
-        // Get tracking events
-        if (track.z1 && Array.isArray(track.z1)) {
-          result.events = track.z1.map((event: { a?: string; c?: string; z?: string }) => ({
-            time: event.a || '',
-            location: event.c || '',
-            description: event.z || '',
-          }))
-        }
-      }
-    } else if (trackData.data?.rejected && trackData.data.rejected.length > 0) {
+    // Check for API errors
+    if (trackData.meta?.code !== 200) {
       result.success = false
-      result.error = trackData.data.rejected[0].error?.message || 'Tracking not found'
-      result.status = 'not_found'
-      result.statusDescription = 'Tracking Not Found'
+      result.error = trackData.meta?.message || 'API error'
+      result.status = 'error'
+      result.statusDescription = trackData.meta?.message || 'Error'
+
+      return new Response(
+        JSON.stringify(result),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Parse successful response
+    const data = trackData.data
+    if (data) {
+      // Get carrier info
+      if (data.carrier_code) {
+        result.carrier = data.carrier_code
+      }
+
+      // Get status
+      const status = data.delivery_status || 'pending'
+      result.status = status
+      result.statusDescription = statusMap[status] || status.charAt(0).toUpperCase() + status.slice(1)
+
+      // Get last update time
+      if (data.lastest_checkpoint_time || data.latest_checkpoint_time) {
+        result.lastUpdate = data.lastest_checkpoint_time || data.latest_checkpoint_time
+      }
+
+      // Get estimated delivery (if available)
+      if (data.expected_delivery) {
+        result.estimatedDelivery = data.expected_delivery
+      }
+
+      // Get tracking events from origin_info
+      const trackInfo = data.origin_info?.trackinfo || data.destination_info?.trackinfo || []
+      if (Array.isArray(trackInfo)) {
+        result.events = trackInfo.map((event: { Date?: string; StatusDescription?: string; Details?: string }) => ({
+          time: event.Date || '',
+          location: event.Details || '',
+          description: event.StatusDescription || '',
+        }))
+      }
     }
 
     return new Response(
