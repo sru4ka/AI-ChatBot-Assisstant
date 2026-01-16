@@ -224,6 +224,9 @@ function injectInlineButton() {
     console.log(`Freshdesk AI: Injected ${injectedCount} buttons inline`)
   }
 
+  // Also try to inject near the Send button if reply editor is open
+  injectNearSendButton()
+
   // Create panel container (always floating, shared by all buttons)
   createPanel()
 
@@ -232,6 +235,73 @@ function injectInlineButton() {
 
   // Add event listeners to all buttons
   setupEventListeners()
+
+  // Watch for Send button appearing (reply editor opening)
+  watchForSendButton()
+}
+
+// Inject button near the Send button in the reply editor
+function injectNearSendButton() {
+  // Find the Send button by text content
+  const allButtons = document.querySelectorAll('button')
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim()
+    if (text === 'Send' || text?.startsWith('Send')) {
+      // Found Send button, check if we already have our button nearby
+      const parent = btn.parentElement
+      if (parent && !parent.querySelector('.freshdesk-ai-inline-wrapper')) {
+        const aiBtn = createButtonElement('freshdesk-ai-inline-btn-send')
+        // Insert before the Send button
+        parent.insertBefore(aiBtn, btn)
+        inlineButtons.push(aiBtn)
+        console.log('Freshdesk AI: Added button next to Send button')
+
+        // Re-attach event listeners
+        const mainBtn = aiBtn.querySelector('.freshdesk-ai-main-btn')
+        const dropdownToggle = aiBtn.querySelector('.freshdesk-ai-dropdown-toggle')
+
+        mainBtn?.addEventListener('click', async (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          document.getElementById('freshdesk-ai-dropdown-menu')?.classList.add('hidden')
+          await handleGenerateReply()
+        })
+
+        dropdownToggle?.addEventListener('click', (e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          const resultPanel = document.getElementById('freshdesk-ai-result-panel')
+          const dropdownMenu = document.getElementById('freshdesk-ai-dropdown-menu')
+          resultPanel?.classList.add('hidden')
+          dropdownMenu?.classList.toggle('hidden')
+          panelContainer?.classList.toggle('hidden', dropdownMenu?.classList.contains('hidden') ?? true)
+        })
+
+        break
+      }
+    }
+  }
+}
+
+// Watch for Send button appearing (when user clicks Reply)
+function watchForSendButton() {
+  const observer = new MutationObserver(() => {
+    // Check if Send button appeared and we don't have our button next to it
+    const allButtons = document.querySelectorAll('button')
+    for (const btn of allButtons) {
+      const text = btn.textContent?.trim()
+      if (text === 'Send' || text?.startsWith('Send')) {
+        const parent = btn.parentElement
+        if (parent && !parent.querySelector('.freshdesk-ai-inline-wrapper')) {
+          // Send button appeared without our button, inject it
+          injectNearSendButton()
+          break
+        }
+      }
+    }
+  })
+
+  observer.observe(document.body, { childList: true, subtree: true })
 }
 
 function createPanel() {
@@ -368,6 +438,10 @@ function setupEventListeners() {
 
 async function loadButtonSettings() {
   try {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+      console.warn('Chrome storage not available')
+      return
+    }
     const result = await chrome.storage.local.get(['freshdeskAiSettings', 'defaultTone', 'customPrompt'])
 
     if (result.freshdeskAiSettings) {
@@ -395,6 +469,10 @@ async function loadButtonSettings() {
 
 async function saveButtonSettings() {
   try {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+      console.warn('Chrome storage not available')
+      return
+    }
     const result = await chrome.storage.local.get(['freshdeskAiSettings'])
     const existingSettings = result.freshdeskAiSettings || {}
 
@@ -456,22 +534,37 @@ async function handleGenerateReply(oneTimeInstructions = '') {
       throw new Error('Could not find customer message on this page')
     }
 
-    // Get signature from settings
-    const settings = await chrome.storage.local.get(['freshdeskAiSettings'])
-    const signature = settings.freshdeskAiSettings?.signature || ''
+    // Get signature from settings - with safety check
+    let signature = ''
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const settings = await chrome.storage.local.get(['freshdeskAiSettings'])
+        signature = settings.freshdeskAiSettings?.signature || ''
+      }
+    } catch (e) {
+      console.warn('Could not access chrome storage for settings:', e)
+    }
 
     // Get auth session - Supabase stores as JSON string, need to parse
-    const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-    let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+    let authData: { access_token?: string; user?: { id: string } } | null = null
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
 
-    // Parse if it's a string (Supabase stores session as JSON string)
-    if (typeof authData === 'string') {
-      try {
-        authData = JSON.parse(authData)
-      } catch (e) {
-        console.error('Failed to parse auth data:', e)
-        authData = null
+        // Parse if it's a string (Supabase stores session as JSON string)
+        if (typeof authData === 'string') {
+          try {
+            authData = JSON.parse(authData)
+          } catch (e) {
+            console.error('Failed to parse auth data:', e)
+            authData = null
+          }
+        }
       }
+    } catch (e) {
+      console.error('Could not access chrome storage for auth:', e)
+      throw new Error('Could not access extension storage. Please refresh the page.')
     }
 
     if (!authData?.access_token) {
@@ -565,7 +658,12 @@ async function handleInsertGeneratedReply() {
 
 // Save Q&A pair to knowledge base for learning
 async function saveToKnowledgeBase(question: string, answer: string) {
-  // Get auth session
+  // Get auth session with safety check
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+    console.warn('Chrome storage not available for learning')
+    return
+  }
+
   const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
   let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
 
