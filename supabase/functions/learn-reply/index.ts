@@ -86,55 +86,44 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Create or get knowledge source for live learning
-    let sourceId: string
+    // Create a document entry so it appears in the Knowledge Base
+    // Extract a short summary for the document name
+    const firstLine = questionSummary.split('\n')[0].slice(0, 80).trim()
+    const docName = `Learned: ${firstLine}${firstLine.length >= 80 ? '...' : ''}`
 
-    // Check if we have a "Live Replies" source
-    const { data: existingSource } = await supabase
-      .from('knowledge_sources')
+    // Save to documents table
+    const { data: doc, error: docError } = await supabase
+      .from('documents')
+      .insert({
+        business_id: businessId,
+        name: docName,
+        content: combinedText,
+      })
       .select('id')
-      .eq('business_id', businessId)
-      .eq('name', 'Live Replies')
       .single()
 
-    if (existingSource) {
-      sourceId = existingSource.id
-    } else {
-      // Create the source
-      const { data: newSource, error: sourceError } = await supabase
-        .from('knowledge_sources')
-        .insert({
-          business_id: businessId,
-          source_type: 'live_replies',
-          name: 'Live Replies',
-          status: 'processed',
-        })
-        .select('id')
-        .single()
+    if (docError) throw docError
 
-      if (sourceError) throw sourceError
-      sourceId = newSource.id
-    }
-
-    // Insert the chunk
-    const { error: insertError } = await supabase
-      .from('knowledge_chunks')
+    // Save chunk with embedding
+    const { error: chunkError } = await supabase
+      .from('chunks')
       .insert({
-        source_id: sourceId,
+        document_id: doc.id,
         content: combinedText,
         embedding,
-        metadata: {
-          type: 'live_reply',
-          learned_at: new Date().toISOString(),
-        },
       })
 
-    if (insertError) throw insertError
+    if (chunkError) throw chunkError
 
-    console.log('Successfully learned from reply')
+    console.log('Successfully learned from reply, document created:', doc.id)
 
     return new Response(
-      JSON.stringify({ success: true, message: 'Learned from reply' }),
+      JSON.stringify({
+        success: true,
+        message: 'Learned from reply',
+        documentId: doc.id,
+        documentName: docName,
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
