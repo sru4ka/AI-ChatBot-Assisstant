@@ -539,6 +539,14 @@ async function handleGenerateReply(oneTimeInstructions = '') {
 
   if (!resultPanel || !content || !panelContainer) return
 
+  // Auto-open the reply editor first so it's ready when the AI generates a reply
+  const replyOpened = await openReplyEditor()
+  if (replyOpened) {
+    console.log('Freshdesk AI: Reply editor opened, waiting for it to load...')
+    // Wait for the editor to appear
+    await new Promise(resolve => setTimeout(resolve, 800))
+  }
+
   // Show panel and loading state
   panelContainer.classList.remove('hidden')
   resultPanel.classList.remove('hidden')
@@ -665,6 +673,19 @@ function handleCopyReply() {
 async function handleInsertGeneratedReply() {
   if (!generatedReply) return
 
+  const insertBtn = document.getElementById('freshdesk-ai-insert') as HTMLButtonElement
+  if (insertBtn) {
+    insertBtn.disabled = true
+    insertBtn.textContent = 'Inserting...'
+  }
+
+  // First, try to open the reply editor by clicking the Reply button
+  const replyOpened = await openReplyEditor()
+  if (replyOpened) {
+    // Wait a bit for the editor to fully appear
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+
   const success = insertReply(generatedReply)
   if (success) {
     showToast('Reply inserted! Learning...', 'success')
@@ -674,11 +695,20 @@ async function handleInsertGeneratedReply() {
 
     // Auto-learn: Save this Q&A pair to knowledge base
     try {
-      await saveToKnowledgeBase(currentConversation, generatedReply)
-      console.log('Freshdesk AI: Saved reply to knowledge base')
+      const result = await saveToKnowledgeBase(currentConversation, generatedReply)
+      if (result.success) {
+        console.log('Freshdesk AI: Saved reply to knowledge base')
+        showToast('✓ Learned and added to Knowledge Base!', 'success')
+      } else if (result.error) {
+        console.warn('Freshdesk AI: Learning issue:', result.error)
+        // Show error if it's not a duplicate
+        if (!result.error.includes('Similar content')) {
+          showToast('Reply inserted, but learning failed', 'error')
+        }
+      }
     } catch (err) {
       console.error('Freshdesk AI: Failed to save to knowledge base:', err)
-      // Don't show error toast - learning is a background task
+      showToast('Reply inserted, but learning failed', 'error')
     }
   } else {
     // Fallback: copy to clipboard
@@ -688,43 +718,137 @@ async function handleInsertGeneratedReply() {
       showToast('Could not insert - please copy manually', 'error')
     })
   }
+
+  // Reset button state
+  if (insertBtn) {
+    insertBtn.disabled = false
+    insertBtn.textContent = 'Insert & Learn'
+  }
 }
 
-// Save Q&A pair to knowledge base for learning
-async function saveToKnowledgeBase(question: string, answer: string) {
-  // Get auth session with safety check
-  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-    console.warn('Chrome storage not available for learning')
-    return
-  }
+// Try to open the reply editor by clicking the Reply button
+async function openReplyEditor(): Promise<boolean> {
+  console.log('Freshdesk AI: Attempting to open reply editor...')
 
-  const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-  let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+  // Selectors for the Reply button in Freshdesk
+  const replyButtonSelectors = [
+    // Primary Freshdesk reply buttons
+    'a[data-action="reply"]',
+    'button[data-action="reply"]',
+    '[data-aid="reply"]',
+    '[data-testid="reply-button"]',
+    // Text-based selectors
+    'a:not(.freshdesk-ai-main-btn)',
+    'button:not(.freshdesk-ai-main-btn)',
+  ]
 
-  if (typeof authData === 'string') {
+  // First try specific selectors
+  for (const selector of replyButtonSelectors.slice(0, 4)) {
     try {
-      authData = JSON.parse(authData)
+      const btn = document.querySelector(selector) as HTMLElement
+      if (btn) {
+        console.log(`Freshdesk AI: Found reply button via ${selector}`)
+        btn.click()
+        return true
+      }
     } catch (e) {
-      return
+      // Continue
     }
   }
 
-  if (!authData?.access_token) return
+  // Try finding by text content "Reply"
+  const allButtons = document.querySelectorAll('a, button')
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim()
+    // Look for buttons that say exactly "Reply" (not "Reply with AI")
+    if (text === 'Reply' && !btn.classList.contains('freshdesk-ai-main-btn')) {
+      console.log('Freshdesk AI: Found Reply button by text content')
+      ;(btn as HTMLElement).click()
+      return true
+    }
+  }
 
-  // Call the learn-reply endpoint
-  await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/learn-reply', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authData.access_token}`,
-      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-    },
-    body: JSON.stringify({
-      businessId: authData.user?.id,
-      question,
-      answer,
-    }),
-  })
+  // Try clicking on reply area that might expand
+  const replyAreaSelectors = [
+    '.reply-click-area',
+    '[data-aid="reply-click-area"]',
+    '.reply-toggle',
+    '[class*="reply-area"]',
+    '.compose-reply',
+    '[class*="compose"]',
+  ]
+
+  for (const selector of replyAreaSelectors) {
+    try {
+      const area = document.querySelector(selector) as HTMLElement
+      if (area) {
+        console.log(`Freshdesk AI: Found reply area via ${selector}`)
+        area.click()
+        return true
+      }
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  console.log('Freshdesk AI: Could not find reply button/area')
+  return false
+}
+
+// Save Q&A pair to knowledge base for learning
+async function saveToKnowledgeBase(question: string, answer: string): Promise<{ success: boolean; error?: string }> {
+  // Get auth session with safety check
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+    console.warn('Chrome storage not available for learning')
+    return { success: false, error: 'Chrome storage not available. Please refresh the page.' }
+  }
+
+  try {
+    const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+    let authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+
+    if (typeof authData === 'string') {
+      try {
+        authData = JSON.parse(authData)
+      } catch (e) {
+        return { success: false, error: 'Invalid auth data' }
+      }
+    }
+
+    if (!authData?.access_token) {
+      return { success: false, error: 'Not logged in. Please log in via the extension popup.' }
+    }
+
+    // Call the learn-reply endpoint
+    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/learn-reply', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authData.access_token}`,
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+      },
+      body: JSON.stringify({
+        businessId: authData.user?.id,
+        question,
+        answer,
+      }),
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      return { success: false, error: data.error || 'Failed to save to knowledge base' }
+    }
+
+    return { success: true }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    // Check for extension context invalidated error
+    if (errorMessage.includes('Extension context invalidated')) {
+      return { success: false, error: 'Extension was reloaded. Please refresh the page.' }
+    }
+    return { success: false, error: errorMessage }
+  }
 }
 
 // Extract customer info from the Freshdesk ticket page
