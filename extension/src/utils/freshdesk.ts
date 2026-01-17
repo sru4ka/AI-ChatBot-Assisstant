@@ -186,16 +186,22 @@ export function getLatestCustomerMessage(): string | null {
   function isActualMessageContent(text: string): boolean {
     const trimmed = text.trim()
     // Allow short but meaningful messages (thank you, simple questions, acknowledgments)
-    const isShortButMeaningful = trimmed.length >= 10 && trimmed.length < 50 &&
-      (/thank|thanks|great|perfect|awesome|ok|okay|got it|received|appreciate|help/i.test(trimmed) ||
+    const isShortButMeaningful = trimmed.length >= 5 && trimmed.length < 100 &&
+      (/thank|thanks|great|perfect|awesome|ok|okay|got it|received|appreciate|help|please|hi\b|hello/i.test(trimmed) ||
        /\?$/.test(trimmed)) // Ends with question mark
     if (isShortButMeaningful && !isMetadataText(trimmed)) return true
+    // Allow medium messages that look like real content
+    if (trimmed.length >= 30 && trimmed.length < 100) {
+      if (/[.!?,]/.test(trimmed) && trimmed.split(/\s+/).length >= 5) {
+        if (!isMetadataText(trimmed)) return true
+      }
+    }
     // Must be substantial for longer messages
     if (trimmed.length < 50) return false
     // Should contain sentence-like patterns
     if (!/[.!?]/.test(trimmed)) return false
-    // Should have multiple words
-    if (trimmed.split(/\s+/).length < 10) return false
+    // Should have multiple words (lowered threshold)
+    if (trimmed.split(/\s+/).length < 5) return false
     // Should not be metadata
     if (isMetadataText(trimmed)) return false
     return true
@@ -641,26 +647,48 @@ export function getFullConversation(): string | null {
   // Patterns to identify metadata vs actual content
   const metadataPatterns = [
     /^Status:/i, /^Priority:/i, /^Type:/i, /^Group:/i, /^Agent:/i, /^Tags:/i,
-    /^To:/i, /^From:/i, /^CC:/i, /^Subject:/i,
+    /^Subject:/i,
     /reported via email/i, /hours? ago/i, /minutes? ago/i, /days? ago/i,
+    /^\+\d+ conversations?$/i,
+    /^Show activities$/i,
+    /^CONTACT DETAILS$/i,
+    /^TIMELINE$/i,
+    /^PROPERTIES$/i,
+    /^TIME LOGS$/i,
+    /^TO-DO$/i,
+    /^SHOPIFY$/i,
+    /^Open$/i,
+    /^Pending$/i,
+    /^Resolved$/i,
+    /^Closed$/i,
+    /^Resolution Due$/i,
+    /^View more info$/i,
   ]
 
   function isMetadata(text: string): boolean {
     const trimmed = text.trim()
-    if (trimmed.length < 30) return true
+    if (trimmed.length < 20) return true
     return metadataPatterns.some(p => p.test(trimmed))
   }
 
   function isSubstantialContent(text: string): boolean {
     const trimmed = text.trim()
     // Don't filter out short but meaningful messages like "Thank you" or simple questions
-    const isShortButMeaningful = trimmed.length >= 10 && trimmed.length < 40 &&
+    const isShortButMeaningful = trimmed.length >= 5 && trimmed.length < 100 &&
       (/thank|thanks|great|perfect|awesome|ok|okay|got it|received|appreciate/i.test(trimmed) ||
        /\?$/.test(trimmed)) // Ends with question mark
     if (isShortButMeaningful) return true
+    if (trimmed.length < 30) return false
+    // Allow shorter messages that look like real content
+    if (trimmed.length >= 30 && trimmed.length < 100) {
+      // Short but looks like a message
+      if (/[.!?]/.test(trimmed) || /thank|please|help|hello|hi\b/i.test(trimmed)) {
+        return !isMetadata(trimmed)
+      }
+    }
     if (trimmed.length < 40) return false
     if (!/[.!?]/.test(trimmed)) return false
-    if (trimmed.split(/\s+/).length < 8) return false
+    if (trimmed.split(/\s+/).length < 5) return false
     return !isMetadata(trimmed)
   }
 
@@ -699,6 +727,66 @@ export function getFullConversation(): string | null {
           break
         }
       }
+    }
+  }
+
+  // Strategy 0.5: Parse page text directly to find messages by pattern
+  // Freshdesk shows messages with format: "[username] reported via email/replied" followed by timestamp and content
+  if (messages.length === 0) {
+    console.log('Freshdesk AI: Trying direct text parsing...')
+
+    // Pattern to find message blocks: username + action + timestamp + content
+    const messageBlockPattern = /([a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?)\s+(reported via email|replied)\s*\n?\s*(?:\d+\s+(?:hours?|minutes?|days?|day|a day)\s+ago[^\n]*)\s*\n?\s*(?:To:[^\n]*\n?)?([\s\S]*?)(?=(?:[a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?\s+(?:reported via email|replied))|(?:\+\d+\s+conversations?)|(?:CONTACT DETAILS)|(?:TIMELINE)|(?:Reply\s+Add note)|$)/gi
+
+    let match
+    const parsedMessages: Array<{ sender: 'customer' | 'agent', name: string, text: string }> = []
+
+    // Try to identify who is the agent by looking for common agent patterns
+    const agentNamePattern = /([A-Z][a-z]+\s+[A-Z][a-z]+)\s+replied[\s\S]{0,500}?(?:Customer Service|Manager|Support|Representative|\.com)/i
+    const agentMatch = bodyText.match(agentNamePattern)
+    const agentName = agentMatch ? agentMatch[1].toLowerCase() : null
+    console.log('Freshdesk AI: Detected agent name:', agentName)
+
+    while ((match = messageBlockPattern.exec(bodyText)) !== null) {
+      const senderName = match[1].trim()
+      const action = match[2].toLowerCase()
+      let content = match[3].trim()
+
+      // Clean up the content - remove email signatures, quoted text markers, etc.
+      content = content
+        .replace(/-------- Original message --------[\s\S]*$/i, '')
+        .replace(/Sent via the Samsung Galaxy[\s\S]*?smartphone/gi, '')
+        .replace(/Sent from my (?:iPhone|Android|iPad|mobile)[\s\S]*$/i, '')
+        .replace(/^To:\s*[^\n]+\n?/i, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+
+      // Skip if content is too short or looks like metadata
+      if (content.length < 10) continue
+      if (/^(Open|Pending|Resolved|Closed|Status:|Priority:)/i.test(content)) continue
+
+      // Determine if this is customer or agent
+      const senderLower = senderName.toLowerCase()
+      const isAgent = (agentName && senderLower.includes(agentName.split(' ')[0].toLowerCase())) ||
+                      /Customer Service|Manager|Support|Representative/i.test(content.slice(0, 500)) ||
+                      (content.includes('.com') && /replied/i.test(action) && content.length > 100)
+
+      parsedMessages.push({
+        sender: isAgent ? 'agent' : 'customer',
+        name: senderName,
+        text: content.slice(0, 2000)
+      })
+      console.log(`Freshdesk AI: Found message from ${senderName} (${isAgent ? 'agent' : 'customer'}): "${content.slice(0, 50)}..."`)
+    }
+
+    if (parsedMessages.length > 0) {
+      console.log(`Freshdesk AI: Parsed ${parsedMessages.length} messages from page text`)
+      parsedMessages.forEach(m => {
+        messages.push({
+          sender: m.sender,
+          text: `From ${m.name}:\n${m.text}`
+        })
+      })
     }
   }
 
