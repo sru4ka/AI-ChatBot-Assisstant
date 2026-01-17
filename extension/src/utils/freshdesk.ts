@@ -185,7 +185,12 @@ export function getLatestCustomerMessage(): string | null {
 
   function isActualMessageContent(text: string): boolean {
     const trimmed = text.trim()
-    // Must be substantial
+    // Allow short but meaningful messages (thank you, simple questions, acknowledgments)
+    const isShortButMeaningful = trimmed.length >= 10 && trimmed.length < 50 &&
+      (/thank|thanks|great|perfect|awesome|ok|okay|got it|received|appreciate|help/i.test(trimmed) ||
+       /\?$/.test(trimmed)) // Ends with question mark
+    if (isShortButMeaningful && !isMetadataText(trimmed)) return true
+    // Must be substantial for longer messages
     if (trimmed.length < 50) return false
     // Should contain sentence-like patterns
     if (!/[.!?]/.test(trimmed)) return false
@@ -648,6 +653,11 @@ export function getFullConversation(): string | null {
 
   function isSubstantialContent(text: string): boolean {
     const trimmed = text.trim()
+    // Don't filter out short but meaningful messages like "Thank you" or simple questions
+    const isShortButMeaningful = trimmed.length >= 10 && trimmed.length < 40 &&
+      (/thank|thanks|great|perfect|awesome|ok|okay|got it|received|appreciate/i.test(trimmed) ||
+       /\?$/.test(trimmed)) // Ends with question mark
+    if (isShortButMeaningful) return true
     if (trimmed.length < 40) return false
     if (!/[.!?]/.test(trimmed)) return false
     if (trimmed.split(/\s+/).length < 8) return false
