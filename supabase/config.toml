@@ -49,3 +49,6 @@ verify_jwt = false
 
 [functions.ingest-document]
 verify_jwt = false
+
+[functions.learn-reply]
+verify_jwt = false
