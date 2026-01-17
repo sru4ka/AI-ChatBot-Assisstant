@@ -11,6 +11,7 @@ interface RequestBody {
   businessId: string
   question: string
   answer: string
+  ticketId?: string
 }
 
 Deno.serve(async (req: Request) => {
@@ -29,7 +30,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { businessId, question, answer }: RequestBody = await req.json()
+    const { businessId, question, answer, ticketId }: RequestBody = await req.json()
 
     // Validate required fields
     if (!businessId || !question || !answer) {
@@ -88,8 +89,19 @@ Deno.serve(async (req: Request) => {
 
     // Create a document entry so it appears in the Knowledge Base
     // Extract a short summary for the document name
-    const firstLine = questionSummary.split('\n')[0].slice(0, 80).trim()
-    const docName = `Learned: ${firstLine}${firstLine.length >= 80 ? '...' : ''}`
+    const firstLine = questionSummary.split('\n')[0].slice(0, 60).trim()
+    const ticketLabel = ticketId ? `Ticket #${ticketId}` : 'Live Reply'
+    const docName = `${ticketLabel}: ${firstLine}${firstLine.length >= 60 ? '...' : ''}`
+
+    // Store structured content with metadata for display in admin dashboard
+    const structuredContent = JSON.stringify({
+      type: 'learned_reply',
+      ticketId: ticketId || null,
+      question: questionSummary,
+      answer: answerSummary,
+      learnedAt: new Date().toISOString(),
+      combinedText,
+    })
 
     // Save to documents table
     const { data: doc, error: docError } = await supabase
@@ -97,7 +109,7 @@ Deno.serve(async (req: Request) => {
       .insert({
         business_id: businessId,
         name: docName,
-        content: combinedText,
+        content: structuredContent,
       })
       .select('id')
       .single()
@@ -123,6 +135,7 @@ Deno.serve(async (req: Request) => {
         message: 'Learned from reply',
         documentId: doc.id,
         documentName: docName,
+        ticketId: ticketId || null,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

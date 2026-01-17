@@ -134,6 +134,17 @@ export function isOnTicketPage(): boolean {
 }
 
 /**
+ * Extract the ticket ID from the current URL
+ * Returns null if not on a ticket page
+ */
+export function getTicketId(): string | null {
+  const url = window.location.href
+  // Match patterns like /tickets/12345 or /a/tickets/12345
+  const match = url.match(/\/tickets?\/(\d+)/i) || url.match(/\/a\/tickets\/(\d+)/i)
+  return match ? match[1] : null
+}
+
+/**
  * Get the latest customer message from the ticket
  */
 export function getLatestCustomerMessage(): string | null {

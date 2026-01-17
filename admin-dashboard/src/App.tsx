@@ -6,10 +6,12 @@ import Settings from './components/Settings'
 import TestArea from './components/TestArea'
 import DocumentUpload from './components/DocumentUpload'
 import LearnFromTickets from './components/LearnFromTickets'
+import LearnedReplies from './components/LearnedReplies'
 import WebsiteOverview from './components/WebsiteOverview'
 import ShopifyOverview from './components/ShopifyOverview'
 
 type Page = 'dashboard' | 'upload' | 'settings'
+type KnowledgeTab = 'documents' | 'learned'
 
 function App() {
   const [session, setSession] = useState<Session | null>(null)
@@ -18,6 +20,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard')
   const [documents, setDocuments] = useState<Document[]>([])
   const [docsLoading, setDocsLoading] = useState(true)
+  const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>('learned')
 
   useEffect(() => {
     // Get initial session
@@ -230,46 +233,110 @@ function App() {
                     <div className="card-header">
                       <span className="card-icon">📚</span>
                       <h3>Knowledge Base</h3>
-                      <span className="doc-count">{documents.length} documents</span>
+                      <span className="doc-count">{documents.length} items</span>
                     </div>
+
+                    {/* Tabs */}
+                    <div className="knowledge-tabs" style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', marginBottom: '0' }}>
+                      <button
+                        className={`knowledge-tab ${knowledgeTab === 'learned' ? 'active' : ''}`}
+                        onClick={() => setKnowledgeTab('learned')}
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          border: 'none',
+                          background: knowledgeTab === 'learned' ? '#f3f4f6' : 'transparent',
+                          borderBottom: knowledgeTab === 'learned' ? '2px solid #7c3aed' : '2px solid transparent',
+                          cursor: 'pointer',
+                          fontWeight: knowledgeTab === 'learned' ? 600 : 400,
+                          color: knowledgeTab === 'learned' ? '#7c3aed' : '#6b7280',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        Learned Replies
+                      </button>
+                      <button
+                        className={`knowledge-tab ${knowledgeTab === 'documents' ? 'active' : ''}`}
+                        onClick={() => setKnowledgeTab('documents')}
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          border: 'none',
+                          background: knowledgeTab === 'documents' ? '#f3f4f6' : 'transparent',
+                          borderBottom: knowledgeTab === 'documents' ? '2px solid #7c3aed' : '2px solid transparent',
+                          cursor: 'pointer',
+                          fontWeight: knowledgeTab === 'documents' ? 600 : 400,
+                          color: knowledgeTab === 'documents' ? '#7c3aed' : '#6b7280',
+                          transition: 'all 0.2s',
+                        }}
+                      >
+                        Documents
+                      </button>
+                    </div>
+
                     {docsLoading ? (
                       <div className="loading-state">
                         <span className="spinner"></span>
-                        <p>Loading documents...</p>
+                        <p>Loading...</p>
                       </div>
-                    ) : documents.length === 0 ? (
-                      <div className="empty-state">
-                        <p>No documents uploaded yet.</p>
-                        <p>Go to <strong>Upload Info</strong> to add documents to your knowledge base.</p>
-                        <button
-                          className="btn btn-primary"
-                          style={{ marginTop: '1rem' }}
-                          onClick={() => setCurrentPage('upload')}
-                        >
-                          Upload Documents
-                        </button>
-                      </div>
+                    ) : knowledgeTab === 'learned' ? (
+                      <LearnedReplies
+                        documents={documents}
+                        onDelete={handleDeleteDocument}
+                      />
                     ) : (
-                      <ul className="document-list">
-                        {documents.map((doc) => (
-                          <li key={doc.id} className="document-item">
-                            <div className="document-info">
-                              <div className="document-name">{doc.name}</div>
-                              <div className="document-meta">
-                                Uploaded: {new Date(doc.created_at).toLocaleDateString()}
-                              </div>
-                            </div>
-                            <div className="document-actions">
-                              <button
-                                className="btn btn-danger btn-sm"
-                                onClick={() => handleDeleteDocument(doc.id)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        {documents.filter(doc => {
+                          try {
+                            const parsed = JSON.parse(doc.content)
+                            return parsed.type !== 'learned_reply'
+                          } catch {
+                            return true // Non-JSON docs are regular documents
+                          }
+                        }).length === 0 ? (
+                          <div className="empty-state">
+                            <p>No documents uploaded yet.</p>
+                            <p>Go to <strong>Upload Info</strong> to add documents to your knowledge base.</p>
+                            <button
+                              className="btn btn-primary"
+                              style={{ marginTop: '1rem' }}
+                              onClick={() => setCurrentPage('upload')}
+                            >
+                              Upload Documents
+                            </button>
+                          </div>
+                        ) : (
+                          <ul className="document-list">
+                            {documents
+                              .filter(doc => {
+                                try {
+                                  const parsed = JSON.parse(doc.content)
+                                  return parsed.type !== 'learned_reply'
+                                } catch {
+                                  return true // Non-JSON docs are regular documents
+                                }
+                              })
+                              .map((doc) => (
+                                <li key={doc.id} className="document-item">
+                                  <div className="document-info">
+                                    <div className="document-name">{doc.name}</div>
+                                    <div className="document-meta">
+                                      Uploaded: {new Date(doc.created_at).toLocaleDateString()}
+                                    </div>
+                                  </div>
+                                  <div className="document-actions">
+                                    <button
+                                      className="btn btn-danger btn-sm"
+                                      onClick={() => handleDeleteDocument(doc.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </li>
+                              ))}
+                          </ul>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

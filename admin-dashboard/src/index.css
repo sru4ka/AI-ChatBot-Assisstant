@@ -728,3 +728,35 @@ body {
     width: 100%;
   }
 }
+
+/* Learned Replies Styles */
+.learned-replies-list {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.learned-reply-item {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.learned-reply-item:last-child {
+  border-bottom: none;
+}
+
+.learned-reply-header:hover {
+  background: #f3f4f6;
+}
+
+.learned-reply-content {
+  background: #fafafa;
+  border-top: 1px solid #e5e7eb;
+}
+
+/* Knowledge Base Tabs */
+.knowledge-tabs {
+  padding: 0 !important;
+}
+
+.knowledge-tab:hover {
+  background: #f3f4f6 !important;
+}

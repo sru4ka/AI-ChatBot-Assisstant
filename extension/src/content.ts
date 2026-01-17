@@ -5,6 +5,7 @@
 
 import {
   isOnTicketPage,
+  getTicketId,
   getLatestCustomerMessage,
   getFullConversation,
   getTicketSubject,
@@ -695,10 +696,11 @@ async function handleInsertGeneratedReply() {
 
     // Auto-learn: Save this Q&A pair to knowledge base
     try {
-      const result = await saveToKnowledgeBase(currentConversation, generatedReply)
+      const ticketId = getTicketId()
+      const result = await saveToKnowledgeBase(currentConversation, generatedReply, ticketId)
       if (result.success) {
-        console.log('Freshdesk AI: Saved reply to knowledge base')
-        showToast('✓ Learned and added to Knowledge Base!', 'success')
+        console.log('Freshdesk AI: Saved reply to knowledge base for ticket', ticketId)
+        showToast(`✓ Learned from Ticket #${ticketId || 'unknown'}!`, 'success')
       } else if (result.error) {
         console.warn('Freshdesk AI: Learning issue:', result.error)
         // Show error if it's not a duplicate
@@ -796,7 +798,7 @@ async function openReplyEditor(): Promise<boolean> {
 }
 
 // Save Q&A pair to knowledge base for learning
-async function saveToKnowledgeBase(question: string, answer: string): Promise<{ success: boolean; error?: string }> {
+async function saveToKnowledgeBase(question: string, answer: string, ticketId?: string | null): Promise<{ success: boolean; error?: string }> {
   // Get auth session with safety check
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
     console.warn('Chrome storage not available for learning')
@@ -831,6 +833,7 @@ async function saveToKnowledgeBase(question: string, answer: string): Promise<{ 
         businessId: authData.user?.id,
         question,
         answer,
+        ticketId: ticketId || undefined,
       }),
     })
 
@@ -840,6 +843,7 @@ async function saveToKnowledgeBase(question: string, answer: string): Promise<{ 
       return { success: false, error: data.error || 'Failed to save to knowledge base' }
     }
 
+    console.log('Freshdesk AI: Learned from ticket', ticketId || 'unknown', 'document:', data.documentName)
     return { success: true }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
