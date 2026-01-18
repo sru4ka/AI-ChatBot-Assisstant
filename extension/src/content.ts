@@ -2175,8 +2175,8 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
       orders = orders.slice(0, 5) // Limit to 5
 
       // Render compact order cards
-      orderResultDiv.innerHTML = orders.map((order: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[] }) => `
-        <div class="sidebar-order-card">
+      orderResultDiv.innerHTML = orders.map((order: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[]; adminUrl?: string }) => `
+        <a href="${order.adminUrl || '#'}" target="_blank" class="sidebar-order-card" style="text-decoration: none; color: inherit; display: block;">
           <div class="sidebar-order-row">
             <span class="sidebar-order-name">${order.name}</span>
             <span class="sidebar-order-date">${new Date(order.date).toLocaleDateString()}</span>
@@ -2189,7 +2189,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
           ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
             <div class="sidebar-order-tracking">📦 ${order.trackingNumbers[0]}</div>
           ` : ''}
-        </div>
+        </a>
       `).join('')
       orderResultDiv.classList.remove('hidden')
       showToast(`Found ${orders.length} order(s)`, 'success')
@@ -2327,7 +2327,7 @@ function autoDisplaySidebarOrders() {
 
   const orders = data.orders.slice(0, 5)
   orderResultDiv.innerHTML = orders.map(order => `
-    <div class="sidebar-order-card">
+    <a href="${order.adminUrl || '#'}" target="_blank" class="sidebar-order-card" style="text-decoration: none; color: inherit; display: block;">
       <div class="sidebar-order-row">
         <span class="sidebar-order-name">${order.name}</span>
         <span class="sidebar-order-date">${new Date(order.date).toLocaleDateString()}</span>
@@ -2340,7 +2340,7 @@ function autoDisplaySidebarOrders() {
       ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
         <div class="sidebar-order-tracking">📦 ${order.trackingNumbers[0]}</div>
       ` : ''}
-    </div>
+    </a>
   `).join('')
   orderResultDiv.classList.remove('hidden')
   orderBtn.textContent = 'Refresh Orders'

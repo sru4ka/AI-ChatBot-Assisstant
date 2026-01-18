@@ -1475,6 +1475,15 @@
   padding: 8px 10px;
   border: 1px solid #d1fae5;
   margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sidebar-order-card:hover {
+  background: #f0fdf4;
+  border-color: #10b981;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.15);
 }
 
 .sidebar-order-card:last-child {
