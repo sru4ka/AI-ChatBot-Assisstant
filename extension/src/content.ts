@@ -2041,7 +2041,6 @@ function injectSidebarSummaryButton() {
         </div>
         <div class="sidebar-summary-content">
           <div class="sidebar-loading"><span class="sidebar-spinner"></span></div>
-          <button class="sidebar-summary-generate-btn hidden">Refresh</button>
           <div class="sidebar-summary-result hidden"></div>
         </div>
       </div>
@@ -2051,7 +2050,6 @@ function injectSidebarSummaryButton() {
         </div>
         <div class="sidebar-order-content">
           <div class="sidebar-loading"><span class="sidebar-spinner"></span></div>
-          <button class="sidebar-order-fetch-btn hidden">Refresh</button>
           <div class="sidebar-order-result hidden"></div>
         </div>
       </div>
@@ -2162,197 +2160,11 @@ function injectSidebarSummaryButton() {
 
 /**
  * Attach click handlers to sidebar widgets (Summary + Order Info)
+ * Note: Refresh buttons removed - data auto-loads via preloadTicketData()
  */
-function attachSidebarSummaryHandler(container: HTMLElement) {
-  // Summary widget handler
-  const generateBtn = container.querySelector('.sidebar-summary-generate-btn')
-  const resultDiv = container.querySelector('.sidebar-summary-result')
-
-  generateBtn?.addEventListener('click', async () => {
-    if (!resultDiv || !generateBtn) return
-
-    (generateBtn as HTMLButtonElement).disabled = true
-    generateBtn.textContent = 'Refreshing...'
-    resultDiv.classList.add('hidden')
-
-    try {
-      // Get auth data
-      let authData: { access_token?: string; user?: { id: string } } | null = null
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
-        if (typeof authData === 'string') {
-          authData = JSON.parse(authData)
-        }
-      }
-
-      if (!authData?.access_token) {
-        throw new Error('Please log in via the extension popup first')
-      }
-
-      // Get conversation
-      const conversation = getFullConversation() || getLatestCustomerMessage() || ''
-      if (!conversation) {
-        throw new Error('Could not find ticket conversation')
-      }
-
-      const ticketId = getTicketId()
-
-      // Call summarize API
-      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authData.access_token}`,
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-        },
-        body: JSON.stringify({
-          businessId: authData.user?.id,
-          conversation,
-          ticketId,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to generate summary')
-      }
-
-      const data = await response.json()
-
-      resultDiv.innerHTML = `
-        <div class="sidebar-summary-card">
-          <p class="sidebar-summary-text">${data.summary}</p>
-          ${data.keyPoints && data.keyPoints.length > 0 ? `
-            <ul class="sidebar-key-points">
-              ${data.keyPoints.map((point: string) => `<li>${point}</li>`).join('')}
-            </ul>
-          ` : ''}
-          ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
-          ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
-        </div>
-      `
-      resultDiv.classList.remove('hidden')
-      showToast('Summary generated!', 'success')
-    } catch (error) {
-      resultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
-      resultDiv.classList.remove('hidden')
-    } finally {
-      (generateBtn as HTMLButtonElement).disabled = false
-      generateBtn.textContent = 'Refresh'
-    }
-  })
-
-  // Order Info widget handler
-  const orderBtn = container.querySelector('.sidebar-order-fetch-btn')
-  const orderResultDiv = container.querySelector('.sidebar-order-result')
-
-  orderBtn?.addEventListener('click', async () => {
-    if (!orderResultDiv || !orderBtn) return
-
-    (orderBtn as HTMLButtonElement).disabled = true
-    orderBtn.textContent = 'Refreshing...'
-    orderResultDiv.classList.add('hidden')
-
-    try {
-      // Get auth data
-      let authData: { access_token?: string; user?: { id: string } } | null = null
-      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
-        if (typeof authData === 'string') {
-          authData = JSON.parse(authData)
-        }
-      }
-
-      if (!authData?.access_token) {
-        throw new Error('Please log in first')
-      }
-
-      // Extract customer info
-      const customerInfo = extractCustomerInfo()
-      console.log('Freshdesk AI Sidebar: Extracted customer info:', customerInfo)
-
-      // Prioritize email to get ALL customer orders
-      let searchQuery = ''
-      if (customerInfo.email) {
-        searchQuery = customerInfo.email
-      } else if (customerInfo.orderNumber) {
-        searchQuery = `#${customerInfo.orderNumber}`
-      } else if (customerInfo.name) {
-        searchQuery = customerInfo.name
-      }
-
-      if (!searchQuery) {
-        throw new Error('No customer info found on this ticket')
-      }
-
-      console.log('Freshdesk AI Sidebar: Searching with query:', searchQuery)
-
-      // Fetch orders
-      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authData.access_token}`,
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-        },
-        body: JSON.stringify({
-          businessId: authData.user?.id,
-          searchQuery,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error('Freshdesk AI Sidebar: API error', response.status, errorText)
-        throw new Error(`API error: ${response.status}`)
-      }
-
-      const data = await response.json()
-      console.log('Freshdesk AI Sidebar: Got orders response:', data)
-
-      if (!data.orders || data.orders.length === 0) {
-        orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
-        orderResultDiv.classList.remove('hidden')
-        return
-      }
-
-      // Filter by email if available
-      let orders = data.orders
-      if (customerInfo.email) {
-        const emailLower = customerInfo.email.toLowerCase()
-        const filtered = orders.filter((o: { email?: string }) => o.email?.toLowerCase() === emailLower)
-        if (filtered.length > 0) orders = filtered
-      }
-      orders = orders.slice(0, 5) // Limit to 5
-
-      // Render compact order cards
-      orderResultDiv.innerHTML = orders.map((order: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[]; adminUrl?: string }) => `
-        <a href="${order.adminUrl || '#'}" target="_blank" class="sidebar-order-card" style="text-decoration: none; color: inherit; display: block;">
-          <div class="sidebar-order-row">
-            <span class="sidebar-order-name">${order.name}</span>
-            <span class="sidebar-order-date">${new Date(order.date).toLocaleDateString()}</span>
-          </div>
-          <div class="sidebar-order-row">
-            <span class="sidebar-order-status ${order.status}">${order.status}</span>
-            ${order.fulfillmentStatus ? `<span class="sidebar-order-status ${order.fulfillmentStatus}">${order.fulfillmentStatus}</span>` : ''}
-            <span class="sidebar-order-total">${order.total}</span>
-          </div>
-          ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
-            <div class="sidebar-order-tracking">📦 ${order.trackingNumbers[0]}</div>
-          ` : ''}
-        </a>
-      `).join('')
-      orderResultDiv.classList.remove('hidden')
-      showToast(`Found ${orders.length} order(s)`, 'success')
-    } catch (error) {
-      orderResultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
-      orderResultDiv.classList.remove('hidden')
-    } finally {
-      (orderBtn as HTMLButtonElement).disabled = false
-      orderBtn.textContent = 'Refresh'
-    }
-  })
+function attachSidebarSummaryHandler(_container: HTMLElement) {
+  // No-op: Data is auto-loaded via preloadTicketData()
+  // Keeping function for backwards compatibility with injection code
 }
 
 // Preload Order Info and Summary in background for instant display
@@ -2466,13 +2278,11 @@ function autoDisplaySidebarOrders() {
   if (!preloadedOrderData) return
 
   const orderResultDiv = document.querySelector('.sidebar-order-result')
-  const orderBtn = document.querySelector('.sidebar-order-fetch-btn') as HTMLElement | null
   const orderLoading = document.querySelector('.sidebar-order-content .sidebar-loading') as HTMLElement | null
-  if (!orderResultDiv || !orderBtn) return
+  if (!orderResultDiv) return
 
-  // Hide loading spinner, show refresh button
+  // Hide loading spinner
   if (orderLoading) orderLoading.classList.add('hidden')
-  orderBtn.classList.remove('hidden')
 
   const data = preloadedOrderData as { orders?: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[]; adminUrl?: string }[] }
   if (!data.orders || data.orders.length === 0) {
@@ -2507,13 +2317,11 @@ function autoDisplaySidebarSummary() {
   if (!preloadedSummaryData) return
 
   const resultDiv = document.querySelector('.sidebar-summary-result')
-  const generateBtn = document.querySelector('.sidebar-summary-generate-btn') as HTMLElement | null
   const summaryLoading = document.querySelector('.sidebar-summary-content .sidebar-loading') as HTMLElement | null
-  if (!resultDiv || !generateBtn) return
+  if (!resultDiv) return
 
-  // Hide loading spinner, show refresh button
+  // Hide loading spinner
   if (summaryLoading) summaryLoading.classList.add('hidden')
-  generateBtn.classList.remove('hidden')
 
   const data = preloadedSummaryData as { summary?: string; keyPoints?: string[]; sentiment?: string; actionNeeded?: string }
   if (!data.summary) return
