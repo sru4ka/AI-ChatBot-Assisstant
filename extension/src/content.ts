@@ -1243,7 +1243,7 @@ function renderOrderData(
             ${order.trackingNumbers.map((num: string, i: number) => `
               <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">
                 <span>${order.trackingCompanies?.[i] || 'Other'}: <strong>${num}</strong></span>
-                <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Loading...</button>
+                <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Track</button>
                 ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
               </div>
               <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
@@ -1303,6 +1303,48 @@ function renderOrderData(
   emptyEl.classList.add('hidden')
 }
 
+// Set up tracking button click handlers
+async function setupTrackingButtonHandlers(container: HTMLElement) {
+  // Get auth data for tracking API calls
+  let authData: { access_token?: string; user?: { id: string } } | null = null
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+      authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+      if (typeof authData === 'string') {
+        authData = JSON.parse(authData)
+      }
+    }
+  } catch (e) {
+    console.log('Could not get auth for tracking')
+  }
+
+  if (!authData?.access_token) return
+
+  const trackingButtons = container.querySelectorAll('.get-tracking-status')
+  trackingButtons.forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const target = e.target as HTMLElement
+      const trackingNumber = target.dataset.tracking
+      const carrier = target.dataset.carrier
+      const trackingUrl = target.dataset.url
+      if (trackingNumber && authData?.access_token) {
+        await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl)
+      }
+    })
+  })
+
+  // Auto-fetch tracking status
+  trackingButtons.forEach(async (btn) => {
+    const trackingNumber = (btn as HTMLElement).dataset.tracking
+    const carrier = (btn as HTMLElement).dataset.carrier
+    const trackingUrl = (btn as HTMLElement).dataset.url
+    if (trackingNumber && authData?.access_token) {
+      await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl)
+    }
+  })
+}
+
 // Search for orders from Shopify
 async function handleSearchOrders() {
   const orderInfoContent = document.getElementById('order-info-content')
@@ -1323,6 +1365,9 @@ async function handleSearchOrders() {
     const cachedData = preloadedOrderData
     preloadedOrderData = null
     renderOrderData(cachedData, customerInfo, resultsEl as HTMLElement, emptyEl as HTMLElement, loadingEl as HTMLElement)
+
+    // Set up tracking button handlers for preloaded data
+    setupTrackingButtonHandlers(resultsEl as HTMLElement)
     return
   }
 
@@ -2317,7 +2362,7 @@ function autoDisplaySidebarOrders() {
   const orderBtn = document.querySelector('.sidebar-order-fetch-btn')
   if (!orderResultDiv || !orderBtn) return
 
-  const data = preloadedOrderData as { orders?: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[] }[] }
+  const data = preloadedOrderData as { orders?: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[]; adminUrl?: string }[] }
   if (!data.orders || data.orders.length === 0) {
     orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
     orderResultDiv.classList.remove('hidden')
