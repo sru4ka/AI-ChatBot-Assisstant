@@ -965,6 +965,15 @@
   border-radius: 4px;
 }
 
+.tracking-source-badge {
+  font-size: 10px;
+  color: #7c3aed;
+  background: #ede9fe;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-style: italic;
+}
+
 .tracking-eta {
   font-size: 13px;
   color: #166534;

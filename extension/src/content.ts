@@ -1407,6 +1407,7 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
         <div class="tracking-details-header">
           <span class="tracking-status-badge ${data.status}">${data.statusDescription}</span>
           ${data.carrier ? `<span class="tracking-carrier">${data.carrier}</span>` : ''}
+          ${data.source === 'scraped' ? `<span class="tracking-source-badge">via URL</span>` : ''}
         </div>
         ${data.estimatedDelivery ? `
           <div class="tracking-eta">

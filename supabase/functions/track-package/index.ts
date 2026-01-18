@@ -208,40 +208,44 @@ Deno.serve(async (req: Request) => {
       )
     }
 
+    // STRATEGY: Try scraping FIRST if URL is available (faster and more reliable for many carriers)
+    // Then fall back to API if scraping fails
+    if (trackingUrl) {
+      console.log('Tracking URL provided, trying scraping first:', trackingUrl)
+      const scraped = await scrapeTrackingUrl(trackingUrl)
+      if (scraped) {
+        console.log('Scraping successful:', scraped.statusDescription)
+        return new Response(
+          JSON.stringify({
+            success: true,
+            trackingNumber,
+            carrier: carrier || null,
+            status: scraped.status,
+            statusDescription: scraped.statusDescription,
+            estimatedDelivery: null,
+            lastUpdate: new Date().toISOString(),
+            events: [],
+            source: 'scraped',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      console.log('Scraping failed, will try API...')
+    }
+
     // Use global TrackingMore API key from environment variable
     const trackingApiKey = Deno.env.get('TRACKINGMORE_API_KEY')
 
-    // If no API key, try scraping as primary method
+    // If no API key and scraping already failed above, return error
     if (!trackingApiKey) {
-      console.log('No API key, trying URL scraping...')
-
-      if (trackingUrl) {
-        const scraped = await scrapeTrackingUrl(trackingUrl)
-        if (scraped) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              trackingNumber,
-              carrier: carrier || null,
-              status: scraped.status,
-              statusDescription: scraped.statusDescription,
-              estimatedDelivery: null,
-              lastUpdate: null,
-              events: [],
-              source: 'scraped',
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-      }
-
+      console.log('No API key configured')
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Tracking API not configured and scraping failed.',
+          error: 'Tracking unavailable - no tracking URL or API configured',
           trackingNumber,
           carrier: null,
-          status: 'not_configured',
+          status: 'unavailable',
           statusDescription: 'Tracking unavailable',
           estimatedDelivery: null,
           lastUpdate: null,
