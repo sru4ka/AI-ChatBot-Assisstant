@@ -8,7 +8,7 @@ interface RequestBody {
   businessId: string
   trackingNumber: string
   carrier?: string
-  trackingUrl?: string // optional tracking URL for scraping fallback
+  trackingUrl?: string
 }
 
 interface TrackingEvent {
@@ -28,36 +28,6 @@ interface TrackingResult {
   events: TrackingEvent[]
   error?: string
   source?: string
-}
-
-// Map TrackingMore status to readable descriptions
-const statusMap: Record<string, string> = {
-  'pending': 'Pending',
-  'notfound': 'Not Found',
-  'transit': 'In Transit',
-  'pickup': 'Ready for Pickup',
-  'delivered': 'Delivered',
-  'expired': 'Expired',
-  'undelivered': 'Undelivered',
-  'exception': 'Exception',
-  'inforeceived': 'Info Received',
-}
-
-// Map carrier names to TrackingMore carrier codes
-const carrierCodes: Record<string, string> = {
-  'usps': 'usps',
-  'ups': 'ups',
-  'fedex': 'fedex',
-  'dhl': 'dhl',
-  'china-post': 'china-post',
-  'china-ems': 'china-ems',
-  'yanwen': 'yanwen',
-  'yunexpress': 'yunexpress',
-  'yun express': 'yunexpress',
-  '4px': '4px',
-  'cainiao': 'cainiao',
-  'amazon': 'amazon-fba-usa',
-  'aliexpress': 'aliexpress-standard-shipping',
 }
 
 /**
@@ -94,7 +64,6 @@ async function query4PXApi(trackingNumber: string): Promise<{ status: string; st
     const trackInfo = data.data[0]
     const tracks = trackInfo.tracks || []
 
-    // Map 4PX status to our status
     let status = 'transit'
     let statusDescription = 'In Transit'
 
@@ -106,13 +75,9 @@ async function query4PXApi(trackingNumber: string): Promise<{ status: string; st
       statusDescription = 'Delivered'
     } else if (latestTrack.includes('exception') || latestTrack.includes('abnormal') || latestTrack.includes('unsuccessful') || latestTrack.includes('failed')) {
       status = 'exception'
-      statusDescription = 'Delivery Exception'
-      // Try to get more specific message
-      if (latestTrack.includes('address')) {
-        statusDescription = 'Address Issue - ' + (tracks[0]?.tkDesc || '').substring(0, 50)
-      } else {
-        statusDescription = (tracks[0]?.tkDesc || 'Delivery Exception').substring(0, 60)
-      }
+      statusDescription = latestTrack.includes('address')
+        ? 'Address Issue - ' + (tracks[0]?.tkDesc || '').substring(0, 50)
+        : (tracks[0]?.tkDesc || 'Delivery Exception').substring(0, 60)
     } else if (latestTrack.includes('out for delivery')) {
       status = 'out_for_delivery'
       statusDescription = 'Out for Delivery'
@@ -121,7 +86,6 @@ async function query4PXApi(trackingNumber: string): Promise<{ status: string; st
       statusDescription = 'Held/Customs'
     }
 
-    // Convert tracks to events
     const events: TrackingEvent[] = tracks.slice(0, 10).map((t: { tkTime: string; tkLocation: string; tkDesc: string }) => ({
       time: t.tkTime || '',
       location: t.tkLocation || '',
@@ -164,7 +128,6 @@ async function queryCainiaoApi(trackingNumber: string): Promise<{ status: string
     const trackInfo = data.module[0]
     const details = trackInfo.detailList || []
 
-    // Map Cainiao status
     let status = 'transit'
     let statusDescription = 'In Transit'
 
@@ -188,7 +151,6 @@ async function queryCainiaoApi(trackingNumber: string): Promise<{ status: string
       statusDescription = details[0]?.desc || 'In Transit'
     }
 
-    // Convert to events
     const events: TrackingEvent[] = details.slice(0, 10).map((d: { time: string; standerdDesc: string; desc: string }) => ({
       time: d.time || '',
       location: '',
@@ -203,10 +165,200 @@ async function queryCainiaoApi(trackingNumber: string): Promise<{ status: string
 }
 
 /**
- * Scrape a tracking URL for status keywords
- * Returns a basic status based on keywords found in the page
+ * Query YunExpress API directly for tracking status
  */
-async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusDescription: string; rawText?: string } | null> {
+async function queryYunExpressApi(trackingNumber: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[] } | null> {
+  try {
+    console.log('Querying YunExpress API for:', trackingNumber)
+
+    const response = await fetch('https://www.yuntrack.com/Track/Query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      body: JSON.stringify({
+        NumberList: [trackingNumber],
+        CaptchaVerification: '',
+      }),
+    })
+
+    if (!response.ok) {
+      console.log('YunExpress API failed with status:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log('YunExpress API response:', JSON.stringify(data).substring(0, 500))
+
+    if (!data.ResultList || !data.ResultList[0]) {
+      return null
+    }
+
+    const trackInfo = data.ResultList[0]
+    const tracks = trackInfo.TrackList || []
+
+    let status = 'transit'
+    let statusDescription = 'In Transit'
+
+    const packageStatus = trackInfo.PackageStatus?.toLowerCase() || ''
+    const latestDesc = tracks[0]?.ProcessContent?.toLowerCase() || ''
+
+    if (packageStatus === 'delivered' || latestDesc.includes('delivered') || latestDesc.includes('signed')) {
+      status = 'delivered'
+      statusDescription = 'Delivered'
+    } else if (latestDesc.includes('exception') || latestDesc.includes('abnormal') || latestDesc.includes('failed')) {
+      status = 'exception'
+      statusDescription = tracks[0]?.ProcessContent || 'Delivery Exception'
+    } else if (latestDesc.includes('out for delivery')) {
+      status = 'out_for_delivery'
+      statusDescription = 'Out for Delivery'
+    } else if (latestDesc.includes('customs')) {
+      status = 'held'
+      statusDescription = 'Customs Processing'
+    }
+
+    const events: TrackingEvent[] = tracks.slice(0, 10).map((t: { ProcessDate: string; ProcessLocation: string; ProcessContent: string }) => ({
+      time: t.ProcessDate || '',
+      location: t.ProcessLocation || '',
+      description: t.ProcessContent || '',
+    }))
+
+    return { status, statusDescription, events }
+  } catch (error) {
+    console.error('YunExpress API error:', error)
+    return null
+  }
+}
+
+/**
+ * Query Yanwen API directly for tracking status
+ */
+async function queryYanwenApi(trackingNumber: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[] } | null> {
+  try {
+    console.log('Querying Yanwen API for:', trackingNumber)
+
+    const response = await fetch(`https://track.yw56.com.cn/api/tracking?nums=${trackingNumber}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      console.log('Yanwen API failed with status:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log('Yanwen API response:', JSON.stringify(data).substring(0, 500))
+
+    if (!data.data || !data.data[0]) {
+      return null
+    }
+
+    const trackInfo = data.data[0]
+    const tracks = trackInfo.tracks || trackInfo.checkpoints || []
+
+    let status = 'transit'
+    let statusDescription = 'In Transit'
+
+    const latestDesc = tracks[0]?.message?.toLowerCase() || tracks[0]?.remark?.toLowerCase() || ''
+
+    if (latestDesc.includes('delivered') || latestDesc.includes('signed')) {
+      status = 'delivered'
+      statusDescription = 'Delivered'
+    } else if (latestDesc.includes('exception') || latestDesc.includes('abnormal') || latestDesc.includes('failed')) {
+      status = 'exception'
+      statusDescription = tracks[0]?.message || tracks[0]?.remark || 'Delivery Exception'
+    } else if (latestDesc.includes('out for delivery')) {
+      status = 'out_for_delivery'
+      statusDescription = 'Out for Delivery'
+    } else if (latestDesc.includes('customs')) {
+      status = 'held'
+      statusDescription = 'Customs Processing'
+    }
+
+    const events: TrackingEvent[] = tracks.slice(0, 10).map((t: { time: string; date: string; location: string; message: string; remark: string }) => ({
+      time: t.time || t.date || '',
+      location: t.location || '',
+      description: t.message || t.remark || '',
+    }))
+
+    return { status, statusDescription, events }
+  } catch (error) {
+    console.error('Yanwen API error:', error)
+    return null
+  }
+}
+
+/**
+ * Query 17Track API for any carrier (universal tracker)
+ */
+async function query17TrackApi(trackingNumber: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[] } | null> {
+  try {
+    console.log('Querying 17Track API for:', trackingNumber)
+
+    // 17Track has a public API endpoint for basic tracking
+    const response = await fetch('https://api.17track.net/track/v2/gettrackinfo', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      body: JSON.stringify({
+        data: [{ num: trackingNumber }],
+      }),
+    })
+
+    if (!response.ok) {
+      console.log('17Track API failed with status:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log('17Track API response:', JSON.stringify(data).substring(0, 500))
+
+    if (!data.data || !data.data.accepted || !data.data.accepted[0]) {
+      return null
+    }
+
+    const trackInfo = data.data.accepted[0]
+    const tracks = trackInfo.track?.z || []
+
+    let status = 'transit'
+    let statusDescription = 'In Transit'
+
+    // 17Track status codes: 0=Not found, 10=In transit, 20=Expired, 30=Pick up, 35=Undelivered, 40=Delivered, 50=Alert
+    const trackStatus = trackInfo.track?.e
+    if (trackStatus === 40) {
+      status = 'delivered'
+      statusDescription = 'Delivered'
+    } else if (trackStatus === 50 || trackStatus === 35) {
+      status = 'exception'
+      statusDescription = tracks[0]?.z || 'Delivery Exception'
+    } else if (trackStatus === 30) {
+      status = 'pickup'
+      statusDescription = 'Ready for Pickup'
+    }
+
+    const events: TrackingEvent[] = tracks.slice(0, 10).map((t: { a: string; c: string; z: string }) => ({
+      time: t.a || '',
+      location: t.c || '',
+      description: t.z || '',
+    }))
+
+    return { status, statusDescription, events }
+  } catch (error) {
+    console.error('17Track API error:', error)
+    return null
+  }
+}
+
+/**
+ * Scrape a tracking URL for status keywords
+ */
+async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusDescription: string } | null> {
   try {
     console.log('Scraping tracking URL:', url)
 
@@ -226,13 +378,12 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
     const html = await response.text()
     const textLower = html.toLowerCase()
 
-    // Look for status keywords in priority order
     const statusKeywords: Array<{ keywords: string[]; status: string; description: string }> = [
       { keywords: ['delivered', 'delivery completed', 'has been delivered', 'was delivered', 'package delivered', 'successfully delivered'], status: 'delivered', description: 'Delivered' },
       { keywords: ['abnormal status', 'abnormal', 'delivery attempt unsuccessful', 'delivery attempt failure', 'address is incorrect', 'address is unknown', 'address unknown', 'wrong address', 'incorrect address', 'undeliverable'], status: 'exception', description: 'Delivery Exception' },
       { keywords: ['out for delivery', 'out-for-delivery', 'on vehicle for delivery'], status: 'out_for_delivery', description: 'Out for Delivery' },
-      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route', 'transit'], status: 'transit', description: 'In Transit' },
-      { keywords: ['arrived at', 'departed from', 'processed', 'arrived at destination', 'arrival scan', 'departure scan', 'local delivery center'], status: 'transit', description: 'In Transit' },
+      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route'], status: 'transit', description: 'In Transit' },
+      { keywords: ['arrived at', 'departed from', 'processed', 'arrival scan', 'departure scan'], status: 'transit', description: 'In Transit' },
       { keywords: ['held in', 'held at', 'holding at', 'held by customs', 'customs clearance'], status: 'held', description: 'Held/Customs' },
       { keywords: ['pickup scheduled', 'ready for pickup', 'available for pickup'], status: 'pickup', description: 'Ready for Pickup' },
       { keywords: ['shipped', 'dispatched', 'label created', 'shipping label', 'order shipped'], status: 'shipped', description: 'Shipped' },
@@ -246,16 +397,11 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
           console.log(`Found keyword "${keyword}" - status: ${status}`)
 
           let extraInfo = ''
-
-          // For exceptions/abnormal status, try to extract the specific error message
           if (status === 'exception') {
-            // Try to extract specific error messages
             const errorPatterns = [
               /delivery attempt unsuccessful[.\s]*([^<\n]{0,100})/i,
               /address is (?:incorrect|unknown|wrong)[.\s]*([^<\n]{0,50})/i,
-              /carrier note[:\s]*([^<\n]{0,100})/i,
               /abnormal status[.\s]*([^<\n]{0,100})/i,
-              /exception[:\s]*([^<\n]{0,100})/i,
             ]
             for (const pattern of errorPatterns) {
               const match = html.match(pattern)
@@ -269,26 +415,7 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
             }
           }
 
-          // Try to extract days to delivery
-          if (!extraInfo) {
-            const daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
-            if (daysMatch) {
-              extraInfo = ` (Est. ${daysMatch[1]} days)`
-            }
-          }
-
-          // Try to extract delivery date
-          if (!extraInfo) {
-            const dateMatch = html.match(/(?:estimated|expected|delivery)[\s:]+(?:by\s+)?([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i)
-            if (dateMatch) {
-              extraInfo = ` (Est. ${dateMatch[1]})`
-            }
-          }
-
-          return {
-            status,
-            statusDescription: description + extraInfo,
-          }
+          return { status, statusDescription: description + extraInfo }
         }
       }
     }
@@ -302,60 +429,80 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
 }
 
 /**
- * Try to detect carrier from tracking number format
- * Returns TrackingMore carrier code
+ * Detect carrier from tracking number format
  */
 function detectCarrier(trackingNumber: string): string | null {
   const num = trackingNumber.toUpperCase().replace(/\s/g, '')
 
-  // USPS patterns
-  if (/^(94|93|92|91)\d{20,}$/.test(num) ||
-      /^[A-Z]{2}\d{9}US$/.test(num)) {
-    return 'usps'
-  }
-
-  // UPS patterns
-  if (/^1Z[A-Z0-9]{16}$/.test(num) ||
-      /^T\d{10}$/.test(num)) {
-    return 'ups'
-  }
-
-  // FedEx patterns
-  if (/^\d{12}$/.test(num) ||
-      /^\d{15}$/.test(num) ||
-      /^\d{20}$/.test(num)) {
-    return 'fedex'
-  }
-
-  // DHL patterns
-  if (/^\d{10}$/.test(num) ||
-      /^[A-Z]{3}\d{7}$/.test(num)) {
-    return 'dhl'
-  }
-
-  // China Post / China EMS patterns
-  if (/^[A-Z]{2}\d{9}CN$/.test(num)) {
-    return 'china-ems'
-  }
+  // 4PX patterns
+  if (/^4PX/.test(num) || /^UUSC/.test(num)) return '4px'
 
   // YunExpress patterns
-  if (/^YT\d{16}$/.test(num)) {
-    return 'yunexpress'
-  }
+  if (/^YT\d{16}$/.test(num) || /^YUN/.test(num)) return 'yunexpress'
 
-  // 4PX patterns
-  if (/^4PX\d+$/.test(num) ||
-      /^UUSC\d+$/.test(num)) {
-    return '4px'
-  }
+  // Yanwen patterns
+  if (/^S\d{12}$/.test(num) || /^UY/.test(num)) return 'yanwen'
 
   // Cainiao patterns
-  if (/^LP\d+$/.test(num) ||
-      /^CAINIAO\d+$/.test(num)) {
-    return 'cainiao'
+  if (/^LP\d+$/.test(num) || /^CAINIAO/.test(num) || /^CN/.test(num)) return 'cainiao'
+
+  // China Post / China EMS patterns
+  if (/^[A-Z]{2}\d{9}CN$/.test(num)) return 'china-ems'
+
+  // USPS patterns
+  if (/^(94|93|92|91)\d{20,}$/.test(num) || /^[A-Z]{2}\d{9}US$/.test(num)) return 'usps'
+
+  // UPS patterns
+  if (/^1Z[A-Z0-9]{16}$/.test(num)) return 'ups'
+
+  // FedEx patterns
+  if (/^\d{12}$/.test(num) || /^\d{15}$/.test(num)) return 'fedex'
+
+  // DHL patterns
+  if (/^\d{10}$/.test(num) || /^[A-Z]{3}\d{7}$/.test(num)) return 'dhl'
+
+  return null
+}
+
+/**
+ * Try all carrier APIs in sequence
+ */
+async function tryCarrierApis(trackingNumber: string, detectedCarrier: string, trackingUrl?: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[]; carrier: string; source: string } | null> {
+
+  // Try specific carrier APIs first based on detection
+  if (detectedCarrier === '4px' || trackingNumber.toUpperCase().startsWith('UUSC')) {
+    console.log('Trying 4PX API...')
+    const result = await query4PXApi(trackingNumber)
+    if (result) return { ...result, carrier: '4PX', source: '4px-api' }
   }
 
-  return null // Let TrackingMore auto-detect
+  if (detectedCarrier === 'yunexpress' || trackingNumber.toUpperCase().startsWith('YT')) {
+    console.log('Trying YunExpress API...')
+    const result = await queryYunExpressApi(trackingNumber)
+    if (result) return { ...result, carrier: 'YunExpress', source: 'yunexpress-api' }
+  }
+
+  if (detectedCarrier === 'yanwen') {
+    console.log('Trying Yanwen API...')
+    const result = await queryYanwenApi(trackingNumber)
+    if (result) return { ...result, carrier: 'Yanwen', source: 'yanwen-api' }
+  }
+
+  // Try Cainiao for any Chinese tracking (often works as aggregator)
+  if (detectedCarrier === 'cainiao' || trackingUrl?.includes('cainiao') || detectedCarrier === '4px') {
+    console.log('Trying Cainiao API...')
+    const result = await queryCainiaoApi(trackingNumber)
+    if (result) return { ...result, carrier: 'Cainiao', source: 'cainiao-api' }
+  }
+
+  // Try 17Track as universal fallback for Chinese carriers
+  if (['4px', 'yunexpress', 'yanwen', 'cainiao', 'china-ems'].includes(detectedCarrier)) {
+    console.log('Trying 17Track API...')
+    const result = await query17TrackApi(trackingNumber)
+    if (result) return { ...result, carrier: '17Track', source: '17track-api' }
+  }
+
+  return null
 }
 
 Deno.serve(async (req: Request) => {
@@ -380,76 +527,27 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // Detect carrier from tracking number or URL
     const detectedCarrier = detectCarrier(trackingNumber) || carrier?.toLowerCase() || ''
-    const is4PX = detectedCarrier === '4px' || trackingNumber.toUpperCase().startsWith('UUSC') || trackingUrl?.includes('4px')
-    const isCainiao = detectedCarrier === 'cainiao' || trackingUrl?.includes('cainiao') || trackingUrl?.includes('global.cainiao')
+    console.log('Tracking:', trackingNumber, 'Detected carrier:', detectedCarrier)
 
-    console.log('Tracking:', trackingNumber, 'Detected carrier:', detectedCarrier, '4PX:', is4PX, 'Cainiao:', isCainiao)
-
-    // STRATEGY 1: Try carrier-specific APIs first (works for JS-rendered pages)
-    if (is4PX) {
-      console.log('Trying 4PX API...')
-      const result = await query4PXApi(trackingNumber)
-      if (result) {
-        console.log('4PX API successful:', result.statusDescription)
-        return new Response(
-          JSON.stringify({
-            success: true,
-            trackingNumber,
-            carrier: '4PX',
-            status: result.status,
-            statusDescription: result.statusDescription,
-            estimatedDelivery: null,
-            lastUpdate: new Date().toISOString(),
-            events: result.events,
-            source: '4px-api',
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-      console.log('4PX API failed, trying Cainiao API...')
-      // 4PX packages are often tracked via Cainiao too
-      const cainiaoResult = await queryCainiaoApi(trackingNumber)
-      if (cainiaoResult) {
-        console.log('Cainiao API successful for 4PX package:', cainiaoResult.statusDescription)
-        return new Response(
-          JSON.stringify({
-            success: true,
-            trackingNumber,
-            carrier: '4PX/Cainiao',
-            status: cainiaoResult.status,
-            statusDescription: cainiaoResult.statusDescription,
-            estimatedDelivery: null,
-            lastUpdate: new Date().toISOString(),
-            events: cainiaoResult.events,
-            source: 'cainiao-api',
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-    }
-
-    if (isCainiao) {
-      console.log('Trying Cainiao API...')
-      const result = await queryCainiaoApi(trackingNumber)
-      if (result) {
-        console.log('Cainiao API successful:', result.statusDescription)
-        return new Response(
-          JSON.stringify({
-            success: true,
-            trackingNumber,
-            carrier: 'Cainiao',
-            status: result.status,
-            statusDescription: result.statusDescription,
-            estimatedDelivery: null,
-            lastUpdate: new Date().toISOString(),
-            events: result.events,
-            source: 'cainiao-api',
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+    // STRATEGY 1: Try carrier-specific APIs
+    const apiResult = await tryCarrierApis(trackingNumber, detectedCarrier, trackingUrl)
+    if (apiResult) {
+      console.log('API successful:', apiResult.source, apiResult.statusDescription)
+      return new Response(
+        JSON.stringify({
+          success: true,
+          trackingNumber,
+          carrier: apiResult.carrier,
+          status: apiResult.status,
+          statusDescription: apiResult.statusDescription,
+          estimatedDelivery: null,
+          lastUpdate: new Date().toISOString(),
+          events: apiResult.events,
+          source: apiResult.source,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     // STRATEGY 2: Fall back to URL scraping
@@ -462,7 +560,7 @@ Deno.serve(async (req: Request) => {
           JSON.stringify({
             success: true,
             trackingNumber,
-            carrier: carrier || null,
+            carrier: carrier || detectedCarrier || null,
             status: scraped.status,
             statusDescription: scraped.statusDescription,
             estimatedDelivery: null,
@@ -473,7 +571,6 @@ Deno.serve(async (req: Request) => {
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      console.log('Scraping failed - could not extract status from tracking page')
     }
 
     // All strategies failed
