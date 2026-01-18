@@ -1243,7 +1243,7 @@ function renderOrderData(
             ${order.trackingNumbers.map((num: string, i: number) => `
               <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">
                 <span>${order.trackingCompanies?.[i] || 'Other'}: <strong>${num}</strong></span>
-                <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Track</button>
+                <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}" data-shopify-status="${order.trackingStatuses?.[i] || ''}">Track</button>
                 ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
               </div>
               <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
@@ -1328,8 +1328,9 @@ async function setupTrackingButtonHandlers(container: HTMLElement) {
       const trackingNumber = target.dataset.tracking
       const carrier = target.dataset.carrier
       const trackingUrl = target.dataset.url
+      const shopifyStatus = target.dataset.shopifyStatus
       if (trackingNumber && authData?.access_token) {
-        await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl)
+        await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl, shopifyStatus)
       }
     })
   })
@@ -1339,8 +1340,9 @@ async function setupTrackingButtonHandlers(container: HTMLElement) {
     const trackingNumber = (btn as HTMLElement).dataset.tracking
     const carrier = (btn as HTMLElement).dataset.carrier
     const trackingUrl = (btn as HTMLElement).dataset.url
+    const shopifyStatus = (btn as HTMLElement).dataset.shopifyStatus
     if (trackingNumber && authData?.access_token) {
-      await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl)
+      await handleGetTrackingStatus(trackingNumber, carrier || '', authData as { access_token: string; user?: { id: string } }, trackingUrl, shopifyStatus)
     }
   })
 }
@@ -1541,7 +1543,7 @@ async function handleSearchOrders() {
               ${order.trackingNumbers.map((num: string, i: number) => `
                 <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">
                   <span>${order.trackingCompanies?.[i] || 'Carrier'}: <strong>${num}</strong></span>
-                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Refresh</button>
+                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}" data-shopify-status="${order.trackingStatuses?.[i] || ''}">Refresh</button>
                   ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
                 </div>
                 <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
@@ -1615,9 +1617,10 @@ async function handleSearchOrders() {
         const target = e.target as HTMLElement
         const trackingNumber = target.dataset.tracking
         const carrier = target.dataset.carrier
-        const trackingUrl = target.dataset.url // For URL scraping fallback
+        const trackingUrl = target.dataset.url
+        const shopifyStatus = target.dataset.shopifyStatus
         if (trackingNumber) {
-          await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl)
+          await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl, shopifyStatus)
         }
       })
     })
@@ -1627,8 +1630,9 @@ async function handleSearchOrders() {
       const trackingNumber = (btn as HTMLElement).dataset.tracking
       const carrier = (btn as HTMLElement).dataset.carrier
       const trackingUrl = (btn as HTMLElement).dataset.url
+      const shopifyStatus = (btn as HTMLElement).dataset.shopifyStatus
       if (trackingNumber) {
-        await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl)
+        await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl, shopifyStatus)
       }
     })
   } catch (error) {
@@ -1648,8 +1652,95 @@ async function handleSearchOrders() {
   }
 }
 
-// Fetch detailed tracking status (API with URL scraping fallback)
-async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }, trackingUrl?: string) {
+// Map Shopify shipment status to readable descriptions
+const shopifyStatusMap: Record<string, { status: string; description: string }> = {
+  'delivered': { status: 'delivered', description: 'Delivered' },
+  'in_transit': { status: 'transit', description: 'In Transit' },
+  'out_for_delivery': { status: 'out_for_delivery', description: 'Out for Delivery' },
+  'attempted_delivery': { status: 'exception', description: 'Delivery Attempted' },
+  'ready_for_pickup': { status: 'pickup', description: 'Ready for Pickup' },
+  'confirmed': { status: 'shipped', description: 'Confirmed/Shipped' },
+  'label_printed': { status: 'pending', description: 'Label Printed' },
+  'label_purchased': { status: 'pending', description: 'Label Purchased' },
+  'failure': { status: 'exception', description: 'Delivery Failed' },
+}
+
+// Client-side scraping - runs in browser context
+async function scrapeTrackingUrlClientSide(url: string): Promise<{ status: string; statusDescription: string } | null> {
+  try {
+    console.log('Client-side scraping tracking URL:', url)
+
+    const response = await fetch(url, {
+      mode: 'cors',
+      credentials: 'omit',
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    })
+
+    if (!response.ok) {
+      console.log('Client-side scrape failed with status:', response.status)
+      return null
+    }
+
+    const html = await response.text()
+    const textLower = html.toLowerCase()
+
+    // Status keywords in priority order (same as server-side)
+    const statusKeywords: Array<{ keywords: string[]; status: string; description: string }> = [
+      { keywords: ['delivered', 'delivery completed', 'has been delivered', 'was delivered', 'package delivered', 'successfully delivered'], status: 'delivered', description: 'Delivered' },
+      { keywords: ['abnormal status', 'abnormal', 'delivery attempt unsuccessful', 'delivery attempt failure', 'address is incorrect', 'address is unknown', 'address unknown', 'wrong address', 'incorrect address', 'undeliverable'], status: 'exception', description: 'Delivery Exception' },
+      { keywords: ['out for delivery', 'out-for-delivery', 'on vehicle for delivery'], status: 'out_for_delivery', description: 'Out for Delivery' },
+      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route', 'transit'], status: 'transit', description: 'In Transit' },
+      { keywords: ['arrived at', 'departed from', 'processed', 'arrived at destination', 'arrival scan', 'departure scan', 'local delivery center'], status: 'transit', description: 'In Transit' },
+      { keywords: ['held in', 'held at', 'holding at', 'held by customs', 'customs clearance'], status: 'held', description: 'Held/Customs' },
+      { keywords: ['pickup scheduled', 'ready for pickup', 'available for pickup'], status: 'pickup', description: 'Ready for Pickup' },
+      { keywords: ['shipped', 'dispatched', 'label created', 'shipping label', 'order shipped'], status: 'shipped', description: 'Shipped' },
+      { keywords: ['exception', 'delivery attempt', 'delivery failed', 'unable to deliver', 'returned', 'return to sender'], status: 'exception', description: 'Exception' },
+      { keywords: ['pending', 'awaiting shipment', 'not yet shipped', 'processing', 'info received'], status: 'pending', description: 'Pending' },
+    ]
+
+    for (const { keywords, status, description } of statusKeywords) {
+      for (const keyword of keywords) {
+        if (textLower.includes(keyword)) {
+          console.log(`Client-side found keyword "${keyword}" - status: ${status}`)
+
+          let extraInfo = ''
+
+          // For exceptions, try to extract error details
+          if (status === 'exception') {
+            const errorPatterns = [
+              /delivery attempt unsuccessful[.\s]*([^<\n]{0,100})/i,
+              /address is (?:incorrect|unknown|wrong)[.\s]*([^<\n]{0,50})/i,
+              /abnormal status[.\s]*([^<\n]{0,100})/i,
+            ]
+            for (const pattern of errorPatterns) {
+              const match = html.match(pattern)
+              if (match) {
+                const detail = match[0].replace(/<[^>]*>/g, '').trim().slice(0, 80)
+                if (detail && detail.length > 5) {
+                  extraInfo = ` - ${detail}`
+                  break
+                }
+              }
+            }
+          }
+
+          return { status, statusDescription: description + extraInfo }
+        }
+      }
+    }
+
+    console.log('Client-side scraping: no keywords found')
+    return null
+  } catch (error) {
+    console.log('Client-side scraping failed (likely CORS):', error)
+    return null
+  }
+}
+
+// Fetch detailed tracking status - Shopify first, then client-side scraping, then server fallback
+async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }, trackingUrl?: string, shopifyStatus?: string) {
   const detailsId = `tracking-details-${trackingNumber.replace(/[^a-zA-Z0-9]/g, '')}`
   const detailsEl = document.getElementById(detailsId)
   const btn = document.querySelector(`button[data-tracking="${trackingNumber}"]`) as HTMLButtonElement
@@ -1660,69 +1751,82 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
   btn.disabled = true
   btn.textContent = 'Loading...'
   detailsEl.classList.remove('hidden')
-  detailsEl.innerHTML = '<div class="tracking-loading">Fetching tracking status...</div>'
+  detailsEl.innerHTML = '<div class="tracking-loading">Checking tracking status...</div>'
 
   try {
-    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/track-package', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authData.access_token}`,
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-      },
-      body: JSON.stringify({
-        businessId: authData.user?.id,
-        trackingNumber,
-        carrier: carrier || undefined,
-        trackingUrl: trackingUrl || undefined, // For URL scraping fallback
-      }),
-    })
+    let statusResult: { status: string; statusDescription: string; source: string } | null = null
 
-    const data = await response.json()
-
-    if (!data.success) {
-      detailsEl.innerHTML = `
-        <div class="tracking-error">
-          <p>${data.error || 'Could not fetch tracking status'}</p>
-        </div>
-      `
-      return
+    // STRATEGY 1: Use Shopify's tracking status if available and meaningful
+    if (shopifyStatus && shopifyStatusMap[shopifyStatus]) {
+      const mapped = shopifyStatusMap[shopifyStatus]
+      statusResult = { status: mapped.status, statusDescription: mapped.description, source: 'shopify' }
+      console.log('Using Shopify tracking status:', shopifyStatus, '->', mapped.description)
     }
 
-    // Render tracking details
-    detailsEl.innerHTML = `
-      <div class="tracking-details-content">
-        <div class="tracking-details-header">
-          <span class="tracking-status-badge ${data.status}">${data.statusDescription}</span>
-          ${data.carrier ? `<span class="tracking-carrier">${data.carrier}</span>` : ''}
-          ${data.source === 'scraped' ? `<span class="tracking-source-badge">via URL</span>` : ''}
+    // STRATEGY 2: Try client-side scraping if no Shopify status
+    if (!statusResult && trackingUrl) {
+      detailsEl.innerHTML = '<div class="tracking-loading">Checking tracking page...</div>'
+      const scraped = await scrapeTrackingUrlClientSide(trackingUrl)
+      if (scraped) {
+        statusResult = { ...scraped, source: 'client-scraped' }
+        console.log('Client-side scraping successful:', scraped.statusDescription)
+      }
+    }
+
+    // STRATEGY 3: Fall back to server-side scraping
+    if (!statusResult && trackingUrl) {
+      detailsEl.innerHTML = '<div class="tracking-loading">Fetching from server...</div>'
+      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/track-package', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          trackingNumber,
+          carrier: carrier || undefined,
+          trackingUrl: trackingUrl || undefined,
+        }),
+      })
+
+      const data = await response.json()
+      if (data.success) {
+        statusResult = { status: data.status, statusDescription: data.statusDescription, source: 'server-scraped' }
+      }
+    }
+
+    // Render result
+    if (statusResult) {
+      const sourceLabel = statusResult.source === 'shopify' ? 'Shopify' :
+                          statusResult.source === 'client-scraped' ? 'Live' : 'Server'
+      detailsEl.innerHTML = `
+        <div class="tracking-details-content">
+          <div class="tracking-details-header">
+            <span class="tracking-status-badge ${statusResult.status}">${statusResult.statusDescription}</span>
+            ${carrier ? `<span class="tracking-carrier">${carrier}</span>` : ''}
+            <span class="tracking-source-badge">${sourceLabel}</span>
+          </div>
+          ${trackingUrl ? `
+            <a href="${trackingUrl}" target="_blank" class="tracking-open-link">Open tracking page →</a>
+          ` : ''}
         </div>
-        ${data.estimatedDelivery ? `
-          <div class="tracking-eta">
-            <strong>Est. Delivery:</strong> ${new Date(data.estimatedDelivery).toLocaleDateString()}
+      `
+    } else {
+      // No status found - show link to tracking page
+      detailsEl.innerHTML = `
+        <div class="tracking-details-content">
+          <div class="tracking-details-header">
+            <span class="tracking-status-badge unknown">Status unavailable</span>
           </div>
-        ` : ''}
-        ${data.lastUpdate ? `
-          <div class="tracking-last-update">
-            <strong>Last Update:</strong> ${new Date(data.lastUpdate).toLocaleString()}
-          </div>
-        ` : ''}
-        ${data.events && data.events.length > 0 ? `
-          <details class="tracking-events-details" open>
-            <summary>Tracking History (${data.events.length} events)</summary>
-            <div class="tracking-events-list">
-              ${data.events.slice(0, 10).map((event: { time: string; location: string; description: string }) => `
-                <div class="tracking-event-item">
-                  <div class="tracking-event-time">${event.time ? new Date(event.time).toLocaleString() : ''}</div>
-                  <div class="tracking-event-desc">${event.description}</div>
-                  ${event.location ? `<div class="tracking-event-location">${event.location}</div>` : ''}
-                </div>
-              `).join('')}
-            </div>
-          </details>
-        ` : '<p class="tracking-no-events">No tracking events available yet</p>'}
-      </div>
-    `
+          <p class="tracking-no-events">Could not automatically read tracking status.</p>
+          ${trackingUrl ? `
+            <a href="${trackingUrl}" target="_blank" class="tracking-open-link">Check tracking page manually →</a>
+          ` : ''}
+        </div>
+      `
+    }
 
     btn.textContent = 'Refresh'
   } catch (error) {
@@ -1730,6 +1834,7 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
     detailsEl.innerHTML = `
       <div class="tracking-error">
         <p>Error: ${error instanceof Error ? error.message : 'Failed to fetch tracking'}</p>
+        ${trackingUrl ? `<a href="${trackingUrl}" target="_blank" class="tracking-open-link">Open tracking page →</a>` : ''}
       </div>
     `
   } finally {
