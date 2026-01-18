@@ -61,6 +61,148 @@ const carrierCodes: Record<string, string> = {
 }
 
 /**
+ * Query 4PX API directly for tracking status
+ */
+async function query4PXApi(trackingNumber: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[] } | null> {
+  try {
+    console.log('Querying 4PX API for:', trackingNumber)
+
+    const response = await fetch('https://track.4px.com/track/v2/front/listTrackV2', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+      body: JSON.stringify({
+        queryCodes: [trackingNumber],
+        language: 'en',
+      }),
+    })
+
+    if (!response.ok) {
+      console.log('4PX API failed with status:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log('4PX API response:', JSON.stringify(data).substring(0, 500))
+
+    if (!data.data || !data.data[0]) {
+      return null
+    }
+
+    const trackInfo = data.data[0]
+    const tracks = trackInfo.tracks || []
+
+    // Map 4PX status to our status
+    let status = 'transit'
+    let statusDescription = 'In Transit'
+
+    const latestTrack = tracks[0]?.tkDesc?.toLowerCase() || ''
+    const deliveryState = trackInfo.deliveryState?.toLowerCase() || ''
+
+    if (deliveryState === 'delivered' || latestTrack.includes('delivered') || latestTrack.includes('signed')) {
+      status = 'delivered'
+      statusDescription = 'Delivered'
+    } else if (latestTrack.includes('exception') || latestTrack.includes('abnormal') || latestTrack.includes('unsuccessful') || latestTrack.includes('failed')) {
+      status = 'exception'
+      statusDescription = 'Delivery Exception'
+      // Try to get more specific message
+      if (latestTrack.includes('address')) {
+        statusDescription = 'Address Issue - ' + (tracks[0]?.tkDesc || '').substring(0, 50)
+      } else {
+        statusDescription = (tracks[0]?.tkDesc || 'Delivery Exception').substring(0, 60)
+      }
+    } else if (latestTrack.includes('out for delivery')) {
+      status = 'out_for_delivery'
+      statusDescription = 'Out for Delivery'
+    } else if (latestTrack.includes('customs') || latestTrack.includes('held')) {
+      status = 'held'
+      statusDescription = 'Held/Customs'
+    }
+
+    // Convert tracks to events
+    const events: TrackingEvent[] = tracks.slice(0, 10).map((t: { tkTime: string; tkLocation: string; tkDesc: string }) => ({
+      time: t.tkTime || '',
+      location: t.tkLocation || '',
+      description: t.tkDesc || '',
+    }))
+
+    return { status, statusDescription, events }
+  } catch (error) {
+    console.error('4PX API error:', error)
+    return null
+  }
+}
+
+/**
+ * Query Cainiao API directly for tracking status
+ */
+async function queryCainiaoApi(trackingNumber: string): Promise<{ status: string; statusDescription: string; events: TrackingEvent[] } | null> {
+  try {
+    console.log('Querying Cainiao API for:', trackingNumber)
+
+    const response = await fetch(`https://global.cainiao.com/global/detail.json?mailNos=${trackingNumber}&lang=en-US`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      console.log('Cainiao API failed with status:', response.status)
+      return null
+    }
+
+    const data = await response.json()
+    console.log('Cainiao API response:', JSON.stringify(data).substring(0, 500))
+
+    if (!data.module || !data.module[0]) {
+      return null
+    }
+
+    const trackInfo = data.module[0]
+    const details = trackInfo.detailList || []
+
+    // Map Cainiao status
+    let status = 'transit'
+    let statusDescription = 'In Transit'
+
+    const statusType = trackInfo.statusType?.toLowerCase() || ''
+    const latestDesc = details[0]?.desc?.toLowerCase() || ''
+
+    if (statusType === 'sign' || latestDesc.includes('delivered') || latestDesc.includes('signed')) {
+      status = 'delivered'
+      statusDescription = 'Delivered'
+    } else if (statusType === 'abnormal' || latestDesc.includes('abnormal') || latestDesc.includes('exception') || latestDesc.includes('unsuccessful')) {
+      status = 'exception'
+      statusDescription = details[0]?.desc || 'Delivery Exception'
+    } else if (latestDesc.includes('out for delivery')) {
+      status = 'out_for_delivery'
+      statusDescription = 'Out for Delivery'
+    } else if (latestDesc.includes('customs')) {
+      status = 'held'
+      statusDescription = 'Customs Processing'
+    } else if (statusType === 'transit' || statusType === 'process') {
+      status = 'transit'
+      statusDescription = details[0]?.desc || 'In Transit'
+    }
+
+    // Convert to events
+    const events: TrackingEvent[] = details.slice(0, 10).map((d: { time: string; standerdDesc: string; desc: string }) => ({
+      time: d.time || '',
+      location: '',
+      description: d.standerdDesc || d.desc || '',
+    }))
+
+    return { status, statusDescription, events }
+  } catch (error) {
+    console.error('Cainiao API error:', error)
+    return null
+  }
+}
+
+/**
  * Scrape a tracking URL for status keywords
  * Returns a basic status based on keywords found in the page
  */
@@ -238,10 +380,81 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // SCRAPING-ONLY STRATEGY: Only use URL scraping for tracking
-    // This is more reliable and doesn't require API keys
+    // Detect carrier from tracking number or URL
+    const detectedCarrier = detectCarrier(trackingNumber) || carrier?.toLowerCase() || ''
+    const is4PX = detectedCarrier === '4px' || trackingNumber.toUpperCase().startsWith('UUSC') || trackingUrl?.includes('4px')
+    const isCainiao = detectedCarrier === 'cainiao' || trackingUrl?.includes('cainiao') || trackingUrl?.includes('global.cainiao')
+
+    console.log('Tracking:', trackingNumber, 'Detected carrier:', detectedCarrier, '4PX:', is4PX, 'Cainiao:', isCainiao)
+
+    // STRATEGY 1: Try carrier-specific APIs first (works for JS-rendered pages)
+    if (is4PX) {
+      console.log('Trying 4PX API...')
+      const result = await query4PXApi(trackingNumber)
+      if (result) {
+        console.log('4PX API successful:', result.statusDescription)
+        return new Response(
+          JSON.stringify({
+            success: true,
+            trackingNumber,
+            carrier: '4PX',
+            status: result.status,
+            statusDescription: result.statusDescription,
+            estimatedDelivery: null,
+            lastUpdate: new Date().toISOString(),
+            events: result.events,
+            source: '4px-api',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      console.log('4PX API failed, trying Cainiao API...')
+      // 4PX packages are often tracked via Cainiao too
+      const cainiaoResult = await queryCainiaoApi(trackingNumber)
+      if (cainiaoResult) {
+        console.log('Cainiao API successful for 4PX package:', cainiaoResult.statusDescription)
+        return new Response(
+          JSON.stringify({
+            success: true,
+            trackingNumber,
+            carrier: '4PX/Cainiao',
+            status: cainiaoResult.status,
+            statusDescription: cainiaoResult.statusDescription,
+            estimatedDelivery: null,
+            lastUpdate: new Date().toISOString(),
+            events: cainiaoResult.events,
+            source: 'cainiao-api',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    if (isCainiao) {
+      console.log('Trying Cainiao API...')
+      const result = await queryCainiaoApi(trackingNumber)
+      if (result) {
+        console.log('Cainiao API successful:', result.statusDescription)
+        return new Response(
+          JSON.stringify({
+            success: true,
+            trackingNumber,
+            carrier: 'Cainiao',
+            status: result.status,
+            statusDescription: result.statusDescription,
+            estimatedDelivery: null,
+            lastUpdate: new Date().toISOString(),
+            events: result.events,
+            source: 'cainiao-api',
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
+    // STRATEGY 2: Fall back to URL scraping
     if (trackingUrl) {
-      console.log('Tracking URL provided, scraping:', trackingUrl)
+      console.log('Trying URL scraping:', trackingUrl)
       const scraped = await scrapeTrackingUrl(trackingUrl)
       if (scraped) {
         console.log('Scraping successful:', scraped.statusDescription)
@@ -263,16 +476,16 @@ Deno.serve(async (req: Request) => {
       console.log('Scraping failed - could not extract status from tracking page')
     }
 
-    // No tracking URL provided or scraping failed
-    console.log('No tracking URL available or scraping failed')
+    // All strategies failed
+    console.log('All tracking strategies failed')
     return new Response(
       JSON.stringify({
         success: false,
-        error: trackingUrl ? 'Could not read tracking status from page' : 'No tracking URL available',
+        error: 'Could not retrieve tracking status',
         trackingNumber,
-        carrier: carrier || null,
+        carrier: carrier || detectedCarrier || null,
         status: 'unavailable',
-        statusDescription: trackingUrl ? 'Could not read status' : 'No tracking URL',
+        statusDescription: 'Status unavailable',
         estimatedDelivery: null,
         lastUpdate: null,
         events: [],
