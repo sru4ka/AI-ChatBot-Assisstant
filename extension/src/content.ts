@@ -97,6 +97,24 @@ function createButtonElement(id: string, _matchStyle?: Element | null): HTMLElem
   return wrapper
 }
 
+// Create Order Info button - green themed
+let orderInfoButtons: HTMLElement[] = []
+
+function createOrderInfoButton(id: string): HTMLElement {
+  const wrapper = document.createElement('span')
+  wrapper.id = id
+  wrapper.className = 'freshdesk-ai-order-info-wrapper'
+  wrapper.style.cssText = 'display: inline-flex; align-items: center; margin-left: 8px;'
+
+  wrapper.innerHTML = `
+    <a class="freshdesk-ai-order-btn" href="javascript:void(0)" style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; color: #059669; font-weight: 500; text-decoration: none; font-size: 13px; border-radius: 4px; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border: 1px solid #6ee7b7;">
+      <span style="font-size: 14px;">📦</span>
+      <span>Order Info</span>
+    </a>
+  `
+  return wrapper
+}
+
 // Find all Forward buttons/links on the page
 function findAllForwardButtons(): Element[] {
   const forwardButtons: Element[] = []
@@ -147,6 +165,8 @@ function injectInlineButton() {
   // Remove existing buttons
   inlineButtons.forEach(btn => btn.remove())
   inlineButtons = []
+  orderInfoButtons.forEach(btn => btn.remove())
+  orderInfoButtons = []
 
   // Find all Forward buttons (top and bottom action bars)
   const forwardButtons = findAllForwardButtons()
@@ -155,7 +175,7 @@ function injectInlineButton() {
 
   let injectedCount = 0
 
-  // Inject a button next to each Forward button
+  // Inject buttons next to each Forward button
   forwardButtons.forEach((forwardBtn, index) => {
     // Get the parent that contains the button row
     let parent = forwardBtn.parentElement
@@ -174,19 +194,26 @@ function injectInlineButton() {
 
     if (!parent) return
 
+    // Create Order Info button (to be inserted first, so it appears before Reply with AI)
+    const orderBtn = createOrderInfoButton(`freshdesk-ai-order-btn-${index}`)
+    // Create Reply with AI button
     const btn = createButtonElement(`freshdesk-ai-inline-btn-${index}`, forwardBtn)
 
-    // Try to insert as a sibling right after the Forward button
+    // Try to insert as siblings right after the Forward button
     // Check if Forward button is a direct child or wrapped
     if (parent.contains(forwardBtn)) {
       // Insert directly after the forward button in the same parent
+      // Order: Forward -> Order Info -> Reply with AI
       if (forwardBtn.nextSibling) {
-        parent.insertBefore(btn, forwardBtn.nextSibling)
-        console.log(`Freshdesk AI: Inserted button ${index} after Forward (has sibling)`)
+        parent.insertBefore(orderBtn, forwardBtn.nextSibling)
+        parent.insertBefore(btn, orderBtn.nextSibling)
+        console.log(`Freshdesk AI: Inserted buttons ${index} after Forward (has sibling)`)
       } else {
+        parent.appendChild(orderBtn)
         parent.appendChild(btn)
-        console.log(`Freshdesk AI: Appended button ${index} to Forward's parent`)
+        console.log(`Freshdesk AI: Appended buttons ${index} to Forward's parent`)
       }
+      orderInfoButtons.push(orderBtn)
       inlineButtons.push(btn)
       injectedCount++
     }
@@ -203,12 +230,15 @@ function injectInlineButton() {
       if (text === 'Reply' || text?.match(/Reply$/)) {
         const parent = link.parentElement
         if (parent && !parent.querySelector('.freshdesk-ai-inline-wrapper')) {
+          const orderBtn = createOrderInfoButton(`freshdesk-ai-order-btn-fallback-${injectedCount}`)
           const btn = createButtonElement(`freshdesk-ai-inline-btn-fallback-${injectedCount}`)
+          parent.appendChild(orderBtn)
           parent.appendChild(btn)
+          orderInfoButtons.push(orderBtn)
           inlineButtons.push(btn)
           injectedCount++
-          console.log('Freshdesk AI: Added button to Reply button area')
-          if (injectedCount >= 2) break // Max 2 buttons
+          console.log('Freshdesk AI: Added buttons to Reply button area')
+          if (injectedCount >= 2) break // Max 2 button pairs
         }
       }
     }
@@ -222,7 +252,7 @@ function injectInlineButton() {
     inlineButtons.push(btn)
     console.log('Freshdesk AI: Button added as floating (fallback)')
   } else {
-    console.log(`Freshdesk AI: Injected ${injectedCount} buttons inline`)
+    console.log(`Freshdesk AI: Injected ${injectedCount} button pairs inline`)
   }
 
   // Also try to inject near the Send button if reply editor is open
@@ -440,6 +470,29 @@ function setupEventListeners() {
       e.stopPropagation()
       dropdownMenu?.classList.add('hidden')
       await handleGenerateReply()
+    })
+  })
+
+  // Add event listeners to all Order Info toolbar buttons
+  const orderInfoBtns = document.querySelectorAll('.freshdesk-ai-order-btn')
+  orderInfoBtns.forEach(orderBtn => {
+    orderBtn.addEventListener('click', async (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      // Show panel with Order Info tab selected
+      resultPanel?.classList.add('hidden')
+      dropdownMenu?.classList.remove('hidden')
+      panelContainer?.classList.remove('hidden')
+      // Switch to Order Info tab
+      dropdownTabs?.forEach(tab => {
+        const tabId = (tab as HTMLElement).dataset.tab
+        tab.classList.toggle('active', tabId === 'order-info')
+      })
+      document.getElementById('dropdown-tab-settings')?.classList.add('hidden')
+      document.getElementById('dropdown-tab-order-info')?.classList.remove('hidden')
+      document.getElementById('dropdown-tab-summary')?.classList.add('hidden')
+      // Auto-search orders
+      handleSearchOrders()
     })
   })
 
@@ -995,6 +1048,23 @@ function extractCustomerInfo(): CustomerInfo {
       }
     } catch (e) {
       // Continue
+    }
+  }
+
+  // Try to find email from "To:" field in agent replies (this is the customer's email)
+  if (!info.email) {
+    // Look for "To: customer@email.com" pattern in agent replies
+    const toFieldMatch = bodyText.match(/To:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i)
+    if (toFieldMatch) {
+      const email = toFieldMatch[1].trim()
+      // Make sure it's not a support email
+      if (!email.toLowerCase().includes('support@') &&
+          !email.toLowerCase().includes('ergonomiclux') &&
+          !email.toLowerCase().includes('noreply') &&
+          !email.toLowerCase().includes('freshdesk')) {
+        info.email = email
+        console.log('Freshdesk AI: Found customer email from To: field:', email)
+      }
     }
   }
 
@@ -1892,14 +1962,18 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
 
       // Extract customer info
       const customerInfo = extractCustomerInfo()
+      console.log('Freshdesk AI Sidebar: Extracted customer info:', customerInfo)
+
       const searchQueries: string[] = []
       if (customerInfo.orderNumber) searchQueries.push(`#${customerInfo.orderNumber}`)
       if (customerInfo.email) searchQueries.push(customerInfo.email)
       else if (customerInfo.name) searchQueries.push(customerInfo.name)
 
       if (searchQueries.length === 0) {
-        throw new Error('No customer info found')
+        throw new Error('No customer info found on this ticket')
       }
+
+      console.log('Freshdesk AI Sidebar: Searching with queries:', searchQueries)
 
       // Fetch orders
       const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/search-shopify-orders', {
@@ -1915,7 +1989,14 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
         }),
       })
 
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Freshdesk AI Sidebar: API error', response.status, errorText)
+        throw new Error(`API error: ${response.status}`)
+      }
+
       const data = await response.json()
+      console.log('Freshdesk AI Sidebar: Got orders response:', data)
 
       if (!data.orders || data.orders.length === 0) {
         orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
