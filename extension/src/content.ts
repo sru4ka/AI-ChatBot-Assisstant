@@ -1179,20 +1179,22 @@ async function handleSearchOrders() {
     // Extract customer info from ticket
     const customerInfo = extractCustomerInfo()
 
-    // Build search queries - prioritize email as it's most accurate
-    // If we have email, ONLY use email to avoid getting orders from other customers with same name
+    // Build search queries - prioritize email to get ALL customer orders
+    // Email search returns ALL orders for that customer, which is what we want
     const searchQueries: string[] = []
 
-    if (customerInfo.orderNumber) {
-      // Specific order number is always highest priority
+    if (customerInfo.email) {
+      // Email is the best - it finds ALL orders for this customer
+      searchQueries.push(customerInfo.email)
+    }
+
+    // Fall back to order number if no email (will only find that specific order)
+    if (customerInfo.orderNumber && !customerInfo.email) {
       searchQueries.push(`#${customerInfo.orderNumber}`)
     }
 
-    if (customerInfo.email) {
-      // Email is the most accurate way to find customer's orders
-      searchQueries.push(customerInfo.email)
-    } else {
-      // Only use name/phone if we don't have email (less accurate)
+    // Only use name/phone if we don't have email or order number
+    if (!customerInfo.email && !customerInfo.orderNumber) {
       if (customerInfo.name) {
         searchQueries.push(customerInfo.name)
       }
@@ -1964,19 +1966,24 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
       const customerInfo = extractCustomerInfo()
       console.log('Freshdesk AI Sidebar: Extracted customer info:', customerInfo)
 
-      const searchQueries: string[] = []
-      if (customerInfo.orderNumber) searchQueries.push(`#${customerInfo.orderNumber}`)
-      if (customerInfo.email) searchQueries.push(customerInfo.email)
-      else if (customerInfo.name) searchQueries.push(customerInfo.name)
+      // Prioritize email to get ALL customer orders
+      let searchQuery = ''
+      if (customerInfo.email) {
+        searchQuery = customerInfo.email
+      } else if (customerInfo.orderNumber) {
+        searchQuery = `#${customerInfo.orderNumber}`
+      } else if (customerInfo.name) {
+        searchQuery = customerInfo.name
+      }
 
-      if (searchQueries.length === 0) {
+      if (!searchQuery) {
         throw new Error('No customer info found on this ticket')
       }
 
-      console.log('Freshdesk AI Sidebar: Searching with queries:', searchQueries)
+      console.log('Freshdesk AI Sidebar: Searching with query:', searchQuery)
 
       // Fetch orders
-      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/search-shopify-orders', {
+      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1985,7 +1992,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
         },
         body: JSON.stringify({
           businessId: authData.user?.id,
-          searchQueries,
+          searchQuery,
         }),
       })
 
