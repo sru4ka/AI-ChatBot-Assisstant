@@ -174,8 +174,41 @@ async function searchOrders(
             console.warn('Error fetching fulfillments:', e)
           }
 
-          // Fetch order timeline events using GraphQL (includes staff comments)
+          // Fetch order timeline events - try REST API first (more reliable), then GraphQL for comments
           try {
+            // First, try REST Events API
+            const eventsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/events.json`
+            console.log('Fetching REST events from:', eventsUrl)
+
+            const eventsResponse = await fetch(eventsUrl, {
+              headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+              },
+            })
+
+            if (eventsResponse.ok) {
+              const eventsData = await eventsResponse.json()
+              console.log('REST Events response:', JSON.stringify(eventsData).substring(0, 500))
+
+              events = (eventsData.events || [])
+                .slice(0, 20)
+                .map((e: { id: number; created_at: string; message: string; subject_type: string; verb: string; author?: string; body?: string }) => ({
+                  id: e.id,
+                  created_at: e.created_at,
+                  message: e.message,
+                  subject_type: e.subject_type,
+                  verb: e.verb,
+                  author: e.author || null,
+                  body: e.body || null,
+                }))
+
+              console.log('Parsed REST events:', events.length)
+            } else {
+              console.warn('REST Events API failed:', eventsResponse.status, await eventsResponse.text())
+            }
+
+            // Also try GraphQL for comments (staff notes)
             const graphqlUrl = `https://${storeDomain}/admin/api/${apiVersion}/graphql.json`
             const graphqlQuery = `
               query getOrderTimeline($id: ID!) {
@@ -231,7 +264,7 @@ async function searchOrders(
 
             if (graphqlResponse.ok) {
               const graphqlData = await graphqlResponse.json()
-              console.log('GraphQL response for order', order.id, ':', JSON.stringify(graphqlData))
+              console.log('GraphQL response for order', order.id, ':', JSON.stringify(graphqlData).substring(0, 1000))
 
               if (graphqlData.errors) {
                 console.warn('GraphQL errors:', JSON.stringify(graphqlData.errors))
@@ -242,11 +275,11 @@ async function searchOrders(
               console.log('Order has timeline comments:', hasComments)
 
               const timelineEvents = graphqlData.data?.order?.events?.edges || []
-              console.log('Total timeline events:', timelineEvents.length)
+              console.log('Total GraphQL timeline events:', timelineEvents.length)
 
-              events = timelineEvents.map((edge: { node: { __typename: string; id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string }; attributeToUser?: boolean } }) => {
+              // Merge GraphQL events with REST events, preferring comments from GraphQL
+              const graphqlEvents = timelineEvents.map((edge: { node: { __typename: string; id: string; createdAt: string; message: string; rawMessage?: string; author?: { name: string }; attributeToUser?: boolean } }) => {
                 const isComment = edge.node.__typename === 'CommentEvent'
-                console.log('Event type:', edge.node.__typename, 'isComment:', isComment, 'message:', edge.node.message?.substring(0, 50))
                 return {
                   id: edge.node.id,
                   created_at: edge.node.createdAt,
@@ -258,39 +291,25 @@ async function searchOrders(
                 }
               })
 
-              console.log('Parsed events:', events.length, 'comments:', events.filter((e: ShopifyEvent) => e.verb === 'comment').length)
+              // Add any comments from GraphQL that aren't in REST events
+              const existingIds = new Set(events.map(e => String(e.id)))
+              for (const gqlEvent of graphqlEvents) {
+                // Extract numeric ID from GraphQL ID format
+                const numericId = gqlEvent.id.replace(/\D/g, '')
+                if (!existingIds.has(numericId) && !existingIds.has(gqlEvent.id)) {
+                  events.push(gqlEvent)
+                }
+              }
+
+              // Sort by date
+              events.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+              console.log('Final merged events:', events.length, 'comments:', events.filter((e: ShopifyEvent) => e.verb === 'comment').length)
             } else {
               console.warn('GraphQL response not ok:', graphqlResponse.status, await graphqlResponse.text())
             }
           } catch (e) {
             console.warn('Error fetching timeline events:', e)
-            // Fallback to REST Events API
-            try {
-              const eventsUrl = `https://${storeDomain}/admin/api/${apiVersion}/orders/${order.id}/events.json`
-              const eventsResponse = await fetch(eventsUrl, {
-                headers: {
-                  'X-Shopify-Access-Token': accessToken,
-                  'Content-Type': 'application/json',
-                },
-              })
-
-              if (eventsResponse.ok) {
-                const eventsData = await eventsResponse.json()
-                events = (eventsData.events || [])
-                  .slice(0, 15)
-                  .map((e: { id: number; created_at: string; message: string; subject_type: string; verb: string; author?: string; body?: string }) => ({
-                    id: e.id,
-                    created_at: e.created_at,
-                    message: e.message,
-                    subject_type: e.subject_type,
-                    verb: e.verb,
-                    author: e.author || null,
-                    body: e.body || null,
-                  }))
-              }
-            } catch (restError) {
-              console.warn('Error fetching REST events:', restError)
-            }
           }
 
           order.tracking_numbers = trackingNumbers
