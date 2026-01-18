@@ -1175,7 +1175,8 @@ function renderOrderData(
   emptyEl: HTMLElement,
   _loadingEl: HTMLElement
 ) {
-  const orderData = data as { found?: boolean; orders?: ShopifyOrderResult[] }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orderData = data as { found?: boolean; orders?: any[] }
 
   if (!orderData || !orderData.orders || orderData.orders.length === 0) {
     const searchedInfo = [
@@ -1212,7 +1213,8 @@ function renderOrderData(
   filteredOrders = filteredOrders.slice(0, 10)
 
   // Render orders
-  resultsEl.innerHTML = filteredOrders.map((order: ShopifyOrderResult) => `
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resultsEl.innerHTML = filteredOrders.map((order: any) => `
     <div class="order-card">
       <div class="order-header">
         <span class="order-number">${order.name}</span>
@@ -1299,11 +1301,6 @@ function renderOrderData(
 
   resultsEl.classList.remove('hidden')
   emptyEl.classList.add('hidden')
-
-  // Setup tracking buttons - auto-load tracking status
-  setupTrackingButtons()
-  // Auto-fetch tracking status for all orders
-  autoFetchAllTrackingStatus()
 }
 
 // Search for orders from Shopify
