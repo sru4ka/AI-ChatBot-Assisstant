@@ -1092,20 +1092,26 @@ async function handleSearchOrders() {
     // Extract customer info from ticket
     const customerInfo = extractCustomerInfo()
 
-    // Build search queries in priority order: order number > name > email > phone
+    // Build search queries - prioritize email as it's most accurate
+    // If we have email, ONLY use email to avoid getting orders from other customers with same name
     const searchQueries: string[] = []
 
     if (customerInfo.orderNumber) {
+      // Specific order number is always highest priority
       searchQueries.push(`#${customerInfo.orderNumber}`)
     }
-    if (customerInfo.name) {
-      searchQueries.push(customerInfo.name)
-    }
+
     if (customerInfo.email) {
+      // Email is the most accurate way to find customer's orders
       searchQueries.push(customerInfo.email)
-    }
-    if (customerInfo.phone) {
-      searchQueries.push(customerInfo.phone)
+    } else {
+      // Only use name/phone if we don't have email (less accurate)
+      if (customerInfo.name) {
+        searchQueries.push(customerInfo.name)
+      }
+      if (customerInfo.phone) {
+        searchQueries.push(customerInfo.phone)
+      }
     }
 
     if (searchQueries.length === 0) {
@@ -1133,6 +1139,7 @@ async function handleSearchOrders() {
     // Define order type for proper typing
     interface ShopifyOrderResult {
       name: string
+      email: string
       date: string
       status: string
       fulfillmentStatus: string | null
@@ -1199,8 +1206,25 @@ async function handleSearchOrders() {
       return
     }
 
+    // Filter orders to only show orders matching the customer's email (if available)
+    // This prevents showing orders from other customers with similar names
+    let filteredOrders = data.orders
+    if (customerInfo.email) {
+      const customerEmailLower = customerInfo.email.toLowerCase()
+      filteredOrders = data.orders.filter((order: { email?: string }) =>
+        order.email?.toLowerCase() === customerEmailLower
+      )
+      // If no orders match the email, fall back to showing all (might be a different email on order)
+      if (filteredOrders.length === 0) {
+        filteredOrders = data.orders
+      }
+    }
+
+    // Limit to 5 most recent orders
+    filteredOrders = filteredOrders.slice(0, 5)
+
     // Render orders
-    resultsEl.innerHTML = data.orders.map((order) => `
+    resultsEl.innerHTML = filteredOrders.map((order: ShopifyOrderResult) => `
       <div class="order-card">
         <div class="order-header">
           <span class="order-number">${order.name}</span>
@@ -1246,7 +1270,7 @@ async function handleSearchOrders() {
         ${order.noteAttributes && order.noteAttributes.length > 0 ? `
           <div class="order-note-attributes">
             ${order.noteAttributes.map((attr: { name: string; value: string }) => `
-              <div class="order-note"><strong>${attr.name}:</strong> ${linkifyEbayOrderIds(attr.value)}</div>
+              <div class="order-note"><strong>${attr.name}:</strong> ${linkifyOrderIds(attr.value)}</div>
             `).join('')}
           </div>
         ` : ''}
@@ -1264,14 +1288,14 @@ async function handleSearchOrders() {
                       ${comment.author ? `<span class="comment-author">${comment.author}</span>` : ''}
                       <span class="comment-date">${new Date(comment.created_at).toLocaleString()}</span>
                     </div>
-                    <div class="comment-body">${linkifyEbayOrderIds(comment.body || '')}</div>
+                    <div class="comment-body">${linkifyOrderIds(comment.body || '')}</div>
                   </div>
                 `).join('')}
               </div>
             </details>
           `
         })()}
-        <details class="order-timeline" open>
+        <details class="order-timeline">
           <summary class="order-timeline-title">Timeline ${order.events && order.events.length > 0 ? `(${order.events.length} events)` : ''}</summary>
           <div class="timeline-events">
             ${order.events && order.events.length > 0 ? order.events.slice(0, 15).map((event: { created_at: string; message: string; verb: string; body: string | null; author: string | null }) => `
@@ -1294,7 +1318,7 @@ async function handleSearchOrders() {
     `).join('')
 
     resultsEl.classList.remove('hidden')
-    showToast(`Found ${data.orders.length} order(s)`, 'success')
+    showToast(`Found ${filteredOrders.length} order(s)`, 'success')
 
     // Add tracking status button handlers AND auto-fetch tracking status
     const trackingButtons = resultsEl.querySelectorAll('.get-tracking-status')
@@ -1422,16 +1446,36 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
 }
 
 /**
- * Convert eBay order IDs in text to clickable links
- * Format: XX-XXXXX-XXXXX (e.g., 04-14081-51237, 25-14090-96590)
+ * Convert order IDs in text to clickable links
+ * Supports:
+ * - eBay: XX-XXXXX-XXXXX (e.g., 04-14081-51237, 25-14090-96590)
+ * - AliExpress: Long numeric IDs (e.g., 8207323845276674)
  */
-function linkifyEbayOrderIds(text: string): string {
+function linkifyOrderIds(text: string): string {
   // Pattern for eBay order IDs: 2 digits - 5 digits - 5 digits
   const ebayPattern = /(\d{2}-\d{4,5}-\d{4,5})/g
-  return text.replace(ebayPattern, (match) => {
+
+  // Pattern for AliExpress order IDs: 16+ digit numbers (typically 16-20 digits)
+  const aliexpressPattern = /\b(\d{16,20})\b/g
+
+  // First, replace eBay order IDs
+  let result = text.replace(ebayPattern, (match) => {
     const ebayUrl = `https://www.ebay.com/mye/myebay/purchase?page=1&q=${match}&mp=purchase-search-module-v2&type=v2&pg=purchase`
     return `<a href="${ebayUrl}" target="_blank" class="ebay-order-link">${match}</a>`
   })
+
+  // Then, replace AliExpress order IDs (if not already inside a link)
+  result = result.replace(aliexpressPattern, (match, group, offset, string) => {
+    // Check if this number is already inside an anchor tag (already linked)
+    const before = string.substring(Math.max(0, offset - 50), offset)
+    if (before.includes('<a ') && !before.includes('</a>')) {
+      return match // Already inside a link, don't double-link
+    }
+    const aliexpressUrl = `https://www.aliexpress.com/p/order/detail.html?orderId=${match}`
+    return `<a href="${aliexpressUrl}" target="_blank" class="aliexpress-order-link">${match}</a>`
+  })
+
+  return result
 }
 
 /**
@@ -1573,6 +1617,156 @@ function removeButton() {
   }
 }
 
+/**
+ * Inject a summary button above the Freshdesk TIMELINE widget in the sidebar
+ */
+function injectSidebarSummaryButton() {
+  // Don't inject if already present
+  if (document.getElementById('freshdesk-ai-sidebar-summary-btn')) {
+    return
+  }
+
+  // Find the TIMELINE widget header in Freshdesk sidebar
+  // Look for elements that contain "TIMELINE" text
+  const sidebarWidgets = document.querySelectorAll('.sidebar-widget, .widget, [class*="widget"], .ember-view, .app-sidebar, .sidebar-section, .td-widgets, .td-widget, [data-widget]')
+
+  for (const widget of sidebarWidgets) {
+    const headerText = widget.querySelector('.widget-header, .widget-title, h3, h4, .header, [class*="header"]')?.textContent?.trim()
+    if (headerText?.toUpperCase() === 'TIMELINE' || headerText?.includes('Timeline')) {
+      // Found the Timeline widget, inject our button above it
+      const summaryContainer = document.createElement('div')
+      summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
+      summaryContainer.className = 'freshdesk-ai-sidebar-widget'
+      summaryContainer.innerHTML = `
+        <div class="sidebar-summary-header">
+          <span>✨ AI SUMMARY</span>
+        </div>
+        <div class="sidebar-summary-content">
+          <button class="sidebar-summary-generate-btn">Generate Summary</button>
+          <div class="sidebar-summary-result hidden"></div>
+        </div>
+      `
+
+      // Insert before the Timeline widget
+      widget.parentElement?.insertBefore(summaryContainer, widget)
+      console.log('Freshdesk AI: Injected sidebar summary button above Timeline')
+
+      // Add click handler
+      const generateBtn = summaryContainer.querySelector('.sidebar-summary-generate-btn')
+      const resultDiv = summaryContainer.querySelector('.sidebar-summary-result')
+
+      generateBtn?.addEventListener('click', async () => {
+        if (!resultDiv || !generateBtn) return
+
+        (generateBtn as HTMLButtonElement).disabled = true
+        generateBtn.textContent = 'Generating...'
+        resultDiv.classList.add('hidden')
+
+        try {
+          // Get auth data
+          let authData: { access_token?: string; user?: { id: string } } | null = null
+          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+            const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+            authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+            if (typeof authData === 'string') {
+              authData = JSON.parse(authData)
+            }
+          }
+
+          if (!authData?.access_token) {
+            throw new Error('Please log in via the extension popup first')
+          }
+
+          // Get conversation
+          const conversation = getFullConversation() || getLatestCustomerMessage() || ''
+          if (!conversation) {
+            throw new Error('Could not find ticket conversation')
+          }
+
+          const ticketId = getTicketId()
+
+          // Call summarize API
+          const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${authData.access_token}`,
+              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+            },
+            body: JSON.stringify({
+              businessId: authData.user?.id,
+              conversation,
+              ticketId,
+            }),
+          })
+
+          if (!response.ok) {
+            throw new Error('Failed to generate summary')
+          }
+
+          const data = await response.json()
+
+          resultDiv.innerHTML = `
+            <div class="sidebar-summary-card">
+              <p class="sidebar-summary-text">${data.summary}</p>
+              ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
+              ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
+            </div>
+          `
+          resultDiv.classList.remove('hidden')
+          showToast('Summary generated!', 'success')
+        } catch (error) {
+          resultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
+          resultDiv.classList.remove('hidden')
+        } finally {
+          (generateBtn as HTMLButtonElement).disabled = false
+          generateBtn.textContent = 'Refresh Summary'
+        }
+      })
+
+      return // Found and injected, stop searching
+    }
+  }
+
+  // Fallback: Try to find by more generic selectors
+  const sidebar = document.querySelector('.ticket-sidebar, .app-sidebar, [class*="sidebar"], .right-panel, [class*="right-panel"]')
+  if (sidebar && !document.getElementById('freshdesk-ai-sidebar-summary-btn')) {
+    // Look for any element that might be the timeline widget
+    const allHeaders = sidebar.querySelectorAll('h3, h4, .header, [class*="header"], [class*="title"]')
+    for (const header of allHeaders) {
+      if (header.textContent?.toUpperCase().includes('TIMELINE')) {
+        const widget = header.closest('.widget, .sidebar-section, .ember-view, div[class*="widget"]')
+        if (widget) {
+          const summaryContainer = document.createElement('div')
+          summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
+          summaryContainer.className = 'freshdesk-ai-sidebar-widget'
+          summaryContainer.innerHTML = `
+            <div class="sidebar-summary-header">
+              <span>✨ AI SUMMARY</span>
+            </div>
+            <div class="sidebar-summary-content">
+              <button class="sidebar-summary-generate-btn">Generate Summary</button>
+              <div class="sidebar-summary-result hidden"></div>
+            </div>
+          `
+          widget.parentElement?.insertBefore(summaryContainer, widget)
+          console.log('Freshdesk AI: Injected sidebar summary button (fallback)')
+
+          // Add same click handler
+          const generateBtn = summaryContainer.querySelector('.sidebar-summary-generate-btn')
+          generateBtn?.addEventListener('click', () => {
+            // Trigger the main summary generation
+            handleGenerateSummary()
+          })
+          return
+        }
+      }
+    }
+  }
+
+  console.log('Freshdesk AI: Could not find Timeline widget to inject summary button')
+}
+
 // Initialize
 function init() {
   console.log('Freshdesk AI Assistant content script loaded')
@@ -1581,6 +1775,8 @@ function init() {
     // Delay injection to let Freshdesk UI load
     setTimeout(() => {
       injectInlineButton()
+      // Also try to inject sidebar summary button
+      setTimeout(() => injectSidebarSummaryButton(), 500)
     }, 1000)
   }
 

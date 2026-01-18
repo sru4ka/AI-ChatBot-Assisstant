@@ -1115,6 +1115,22 @@
   text-decoration: underline;
 }
 
+/* AliExpress Order Link */
+.aliexpress-order-link {
+  color: #dc2626;
+  text-decoration: none;
+  font-weight: 600;
+  background: #fee2e2;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.aliexpress-order-link:hover {
+  background: #fecaca;
+  text-decoration: underline;
+}
+
 /* Summary Tab Styles */
 .summary-content {
   padding: 16px;
@@ -1260,4 +1276,108 @@
 
 .summary-error p {
   margin-bottom: 12px;
+}
+
+/* Sidebar Summary Widget - injected into Freshdesk sidebar */
+.freshdesk-ai-sidebar-widget {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+  border: 1px solid #c4b5fd;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.sidebar-summary-header {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  color: white;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.sidebar-summary-header span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-summary-content {
+  padding: 12px;
+}
+
+.sidebar-summary-generate-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: #7c3aed;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sidebar-summary-generate-btn:hover:not(:disabled) {
+  background: #6d28d9;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(109, 40, 217, 0.3);
+}
+
+.sidebar-summary-generate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sidebar-summary-result {
+  margin-top: 10px;
+}
+
+.sidebar-summary-result.hidden {
+  display: none;
+}
+
+.sidebar-summary-card {
+  background: white;
+  border-radius: 6px;
+  padding: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.sidebar-summary-text {
+  font-size: 12px;
+  color: #374151;
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.sidebar-summary-card .sentiment-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.sidebar-action {
+  font-size: 11px;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 8px;
+  border-radius: 4px;
+  margin-top: 8px;
+}
+
+.sidebar-action strong {
+  color: #78350f;
+}
+
+.sidebar-summary-error {
+  font-size: 12px;
+  color: #dc2626;
+  background: #fee2e2;
+  padding: 10px;
+  border-radius: 6px;
+  text-align: center;
+  margin: 0;
 }
