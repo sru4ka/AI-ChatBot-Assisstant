@@ -434,11 +434,15 @@ function setupEventListeners() {
   // Insert button (now also learns)
   insertBtn?.addEventListener('click', handleInsertGeneratedReply)
 
-  // Regenerate button
+  // Regenerate button - now tracks instruction history for chat-like experience
   regenerateBtn?.addEventListener('click', async () => {
-    const oneTimeInstructions = regenInput?.value || ''
-    await handleGenerateReply(oneTimeInstructions)
-    if (regenInput) regenInput.value = '' // Clear after use
+    const newInstruction = regenInput?.value?.trim() || ''
+    if (newInstruction) {
+      // Add to instruction history for chat-like regeneration
+      instructionHistory.push(newInstruction)
+    }
+    await handleGenerateReply(newInstruction)
+    if (regenInput) regenInput.value = '' // Clear input after use
   })
 
   // Tone buttons
@@ -527,6 +531,10 @@ async function saveButtonSettings() {
 
 // Store the current conversation for regeneration
 let currentConversation = ''
+// Store instruction history for chat-like regeneration
+let instructionHistory: string[] = []
+// Store the last AI reply for context
+let lastAiReply = ''
 
 async function handleGenerateReply(oneTimeInstructions = '') {
   if (isGenerating) return
@@ -566,10 +574,16 @@ async function handleGenerateReply(oneTimeInstructions = '') {
   try {
     // Auto-scan: Get full conversation chain (or fall back to latest message)
     // Only re-scan if we don't have a conversation yet (first generation)
-    if (!currentConversation || !oneTimeInstructions) {
+    const isRegeneration = oneTimeInstructions !== ''
+    if (!currentConversation || !isRegeneration) {
       currentConversation = getFullConversation() || ''
       if (!currentConversation) {
         currentConversation = getLatestCustomerMessage() || ''
+      }
+      // Reset instruction history on fresh generation
+      if (!isRegeneration) {
+        instructionHistory = []
+        lastAiReply = ''
       }
     }
 
@@ -628,6 +642,8 @@ async function handleGenerateReply(oneTimeInstructions = '') {
         tone: currentTone,
         customPrompt: currentCustomPrompt || undefined,
         oneTimeInstructions: oneTimeInstructions || undefined, // For regeneration guidance
+        instructionHistory: instructionHistory.length > 0 ? instructionHistory : undefined, // Full history for chat-like experience
+        previousReply: lastAiReply || undefined, // Previous AI reply for context
       }),
     })
 
@@ -638,9 +654,17 @@ async function handleGenerateReply(oneTimeInstructions = '') {
 
     const data = await response.json()
     generatedReply = data.reply + (signature ? `\n\n${signature}` : '')
+    lastAiReply = generatedReply // Store for chat-like regeneration context
 
-    // Show the reply
-    content.innerHTML = `<div class="panel-reply">${generatedReply.replace(/\n/g, '<br>')}</div>`
+    // Show the reply (editable so user can make tweaks before inserting)
+    content.innerHTML = `<div class="panel-reply" contenteditable="true" id="freshdesk-ai-reply-editor">${generatedReply.replace(/\n/g, '<br>')}</div>`
+
+    // Add input listener to track user edits
+    const replyEditor = document.getElementById('freshdesk-ai-reply-editor')
+    replyEditor?.addEventListener('input', () => {
+      // Update generatedReply when user edits
+      generatedReply = replyEditor.innerText || ''
+    })
 
     if (copyBtn) copyBtn.disabled = false
     if (insertBtn) insertBtn.disabled = false

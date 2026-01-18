@@ -296,6 +296,25 @@
   padding: 14px;
   border-radius: 6px;
   border: 1px solid #e9ecef;
+  min-height: 60px;
+  cursor: text;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.panel-reply:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  background: #fff;
+}
+
+.panel-reply[contenteditable="true"]::before {
+  content: '';
+}
+
+.panel-reply:empty::before {
+  content: 'Edit your reply here...';
+  color: #9ca3af;
 }
 
 .panel-error {

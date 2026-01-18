@@ -13,6 +13,8 @@ interface RequestBody {
   tone?: 'professional' | 'friendly' | 'concise'
   customPrompt?: string
   oneTimeInstructions?: string // For regeneration guidance
+  instructionHistory?: string[] // Chat-like history of all regeneration instructions
+  previousReply?: string // Previous AI reply for context
 }
 
 interface ChunkResult {
@@ -162,7 +164,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // Parse request body
-    const { businessId, customerMessage, tone = 'professional', customPrompt, oneTimeInstructions }: RequestBody = await req.json()
+    const { businessId, customerMessage, tone = 'professional', customPrompt, oneTimeInstructions, instructionHistory, previousReply }: RequestBody = await req.json()
 
     // Validate required fields
     if (!businessId || !customerMessage) {
@@ -244,9 +246,23 @@ Deno.serve(async (req: Request) => {
     // Build instruction sections
     let additionalInstructions = ''
 
-    // One-time instructions for regeneration (highest priority)
-    if (oneTimeInstructions) {
+    // Chat-like regeneration: If we have instruction history, show the full conversation of refinements
+    if (instructionHistory && instructionHistory.length > 0) {
+      additionalInstructions += `\n⚠️ REGENERATION WITH INSTRUCTION HISTORY - FOLLOW ALL THESE INSTRUCTIONS:\n`
+      additionalInstructions += `The user has been refining this reply. Apply ALL these instructions (oldest to newest):\n`
+      instructionHistory.forEach((instruction, index) => {
+        additionalInstructions += `${index + 1}. ${instruction}\n`
+      })
+      if (previousReply) {
+        additionalInstructions += `\nPREVIOUS AI REPLY (improve upon this based on the instructions above):\n${previousReply}\n`
+      }
+      additionalInstructions += `\n`
+    } else if (oneTimeInstructions) {
+      // Single regeneration without history (backwards compatibility)
       additionalInstructions += `\n⚠️ REGENERATION REQUEST - FOLLOW THESE SPECIFIC INSTRUCTIONS:\n${oneTimeInstructions}\n`
+      if (previousReply) {
+        additionalInstructions += `\nPREVIOUS AI REPLY (improve upon this):\n${previousReply}\n`
+      }
     }
 
     // Custom business instructions (only use when relevant to the query)
