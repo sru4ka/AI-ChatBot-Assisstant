@@ -1629,145 +1629,171 @@ function injectSidebarSummaryButton() {
     return
   }
 
-  // Find the TIMELINE widget header in Freshdesk sidebar
-  // Look for elements that contain "TIMELINE" text
-  const sidebarWidgets = document.querySelectorAll('.sidebar-widget, .widget, [class*="widget"], .ember-view, .app-sidebar, .sidebar-section, .td-widgets, .td-widget, [data-widget]')
+  console.log('Freshdesk AI: Looking for TIMELINE widget in sidebar...')
 
-  for (const widget of sidebarWidgets) {
-    const headerText = widget.querySelector('.widget-header, .widget-title, h3, h4, .header, [class*="header"]')?.textContent?.trim()
-    if (headerText?.toUpperCase() === 'TIMELINE' || headerText?.includes('Timeline')) {
-      // Found the Timeline widget, inject our button above it
-      const summaryContainer = document.createElement('div')
-      summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
-      summaryContainer.className = 'freshdesk-ai-sidebar-widget'
-      summaryContainer.innerHTML = `
-        <div class="sidebar-summary-header">
-          <span>✨ AI SUMMARY</span>
-        </div>
-        <div class="sidebar-summary-content">
-          <button class="sidebar-summary-generate-btn">Generate Summary</button>
-          <div class="sidebar-summary-result hidden"></div>
-        </div>
-      `
+  // Strategy 1: Find any element containing "TIMELINE" text in the right sidebar area
+  // Freshdesk uses accordion-style widgets with text like "TIMELINE", "CONTACT DETAILS", etc.
+  const allElements = document.querySelectorAll('*')
 
-      // Insert before the Timeline widget
-      widget.parentElement?.insertBefore(summaryContainer, widget)
-      console.log('Freshdesk AI: Injected sidebar summary button above Timeline')
+  for (const el of allElements) {
+    // Check if this element's direct text content is "TIMELINE"
+    const directText = Array.from(el.childNodes)
+      .filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent?.trim())
+      .join('')
 
-      // Add click handler
-      const generateBtn = summaryContainer.querySelector('.sidebar-summary-generate-btn')
-      const resultDiv = summaryContainer.querySelector('.sidebar-summary-result')
+    const fullText = el.textContent?.trim()
 
-      generateBtn?.addEventListener('click', async () => {
-        if (!resultDiv || !generateBtn) return
+    if (directText === 'TIMELINE' || (fullText === 'TIMELINE' && el.children.length <= 1)) {
+      console.log('Freshdesk AI: Found TIMELINE element:', el.tagName, el.className)
 
-        (generateBtn as HTMLButtonElement).disabled = true
-        generateBtn.textContent = 'Generating...'
-        resultDiv.classList.add('hidden')
+      // Find the parent accordion/widget container
+      let widgetContainer = el.closest('[class*="accordion"], [class*="widget"], [class*="panel"], [class*="collapse"], [class*="section"], .ember-view') as HTMLElement
 
-        try {
-          // Get auth data
-          let authData: { access_token?: string; user?: { id: string } } | null = null
-          if (typeof chrome !== 'undefined' && chrome.storage?.local) {
-            const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
-            authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
-            if (typeof authData === 'string') {
-              authData = JSON.parse(authData)
-            }
-          }
+      // If no container found, try going up a few levels
+      if (!widgetContainer) {
+        widgetContainer = el.parentElement?.parentElement as HTMLElement
+      }
 
-          if (!authData?.access_token) {
-            throw new Error('Please log in via the extension popup first')
-          }
+      if (widgetContainer) {
+        console.log('Freshdesk AI: Found widget container:', widgetContainer.tagName, widgetContainer.className)
 
-          // Get conversation
-          const conversation = getFullConversation() || getLatestCustomerMessage() || ''
-          if (!conversation) {
-            throw new Error('Could not find ticket conversation')
-          }
+        // Create and inject our summary widget
+        const summaryContainer = document.createElement('div')
+        summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
+        summaryContainer.className = 'freshdesk-ai-sidebar-widget'
+        summaryContainer.innerHTML = `
+          <div class="sidebar-summary-header">
+            <span>✨ AI SUMMARY</span>
+          </div>
+          <div class="sidebar-summary-content">
+            <button class="sidebar-summary-generate-btn">Generate Summary</button>
+            <div class="sidebar-summary-result hidden"></div>
+          </div>
+        `
 
-          const ticketId = getTicketId()
+        // Insert before the Timeline widget
+        widgetContainer.parentElement?.insertBefore(summaryContainer, widgetContainer)
+        console.log('Freshdesk AI: Injected sidebar summary button above Timeline')
 
-          // Call summarize API
-          const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${authData.access_token}`,
-              'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
-            },
-            body: JSON.stringify({
-              businessId: authData.user?.id,
-              conversation,
-              ticketId,
-            }),
-          })
-
-          if (!response.ok) {
-            throw new Error('Failed to generate summary')
-          }
-
-          const data = await response.json()
-
-          resultDiv.innerHTML = `
-            <div class="sidebar-summary-card">
-              <p class="sidebar-summary-text">${data.summary}</p>
-              ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
-              ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
-            </div>
-          `
-          resultDiv.classList.remove('hidden')
-          showToast('Summary generated!', 'success')
-        } catch (error) {
-          resultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
-          resultDiv.classList.remove('hidden')
-        } finally {
-          (generateBtn as HTMLButtonElement).disabled = false
-          generateBtn.textContent = 'Refresh Summary'
-        }
-      })
-
-      return // Found and injected, stop searching
+        // Add click handler
+        attachSidebarSummaryHandler(summaryContainer)
+        return
+      }
     }
   }
 
-  // Fallback: Try to find by more generic selectors
-  const sidebar = document.querySelector('.ticket-sidebar, .app-sidebar, [class*="sidebar"], .right-panel, [class*="right-panel"]')
-  if (sidebar && !document.getElementById('freshdesk-ai-sidebar-summary-btn')) {
-    // Look for any element that might be the timeline widget
-    const allHeaders = sidebar.querySelectorAll('h3, h4, .header, [class*="header"], [class*="title"]')
-    for (const header of allHeaders) {
-      if (header.textContent?.toUpperCase().includes('TIMELINE')) {
-        const widget = header.closest('.widget, .sidebar-section, .ember-view, div[class*="widget"]')
-        if (widget) {
-          const summaryContainer = document.createElement('div')
-          summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
-          summaryContainer.className = 'freshdesk-ai-sidebar-widget'
-          summaryContainer.innerHTML = `
-            <div class="sidebar-summary-header">
-              <span>✨ AI SUMMARY</span>
-            </div>
-            <div class="sidebar-summary-content">
-              <button class="sidebar-summary-generate-btn">Generate Summary</button>
-              <div class="sidebar-summary-result hidden"></div>
-            </div>
-          `
-          widget.parentElement?.insertBefore(summaryContainer, widget)
-          console.log('Freshdesk AI: Injected sidebar summary button (fallback)')
+  // Strategy 2: Look for CONTACT DETAILS and insert after it (TIMELINE is usually right after)
+  for (const el of allElements) {
+    const text = el.textContent?.trim()
+    if (text === 'CONTACT DETAILS' && el.children.length <= 1) {
+      let widgetContainer = el.closest('[class*="accordion"], [class*="widget"], [class*="panel"], .ember-view') as HTMLElement
+      if (!widgetContainer) {
+        widgetContainer = el.parentElement?.parentElement as HTMLElement
+      }
 
-          // Add same click handler
-          const generateBtn = summaryContainer.querySelector('.sidebar-summary-generate-btn')
-          generateBtn?.addEventListener('click', () => {
-            // Trigger the main summary generation
-            handleGenerateSummary()
-          })
-          return
-        }
+      if (widgetContainer && widgetContainer.nextElementSibling) {
+        console.log('Freshdesk AI: Found CONTACT DETAILS, inserting summary after it')
+
+        const summaryContainer = document.createElement('div')
+        summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
+        summaryContainer.className = 'freshdesk-ai-sidebar-widget'
+        summaryContainer.innerHTML = `
+          <div class="sidebar-summary-header">
+            <span>✨ AI SUMMARY</span>
+          </div>
+          <div class="sidebar-summary-content">
+            <button class="sidebar-summary-generate-btn">Generate Summary</button>
+            <div class="sidebar-summary-result hidden"></div>
+          </div>
+        `
+
+        // Insert after CONTACT DETAILS (before TIMELINE)
+        widgetContainer.parentElement?.insertBefore(summaryContainer, widgetContainer.nextElementSibling)
+        attachSidebarSummaryHandler(summaryContainer)
+        return
       }
     }
   }
 
   console.log('Freshdesk AI: Could not find Timeline widget to inject summary button')
+}
+
+/**
+ * Attach click handler to sidebar summary button
+ */
+function attachSidebarSummaryHandler(container: HTMLElement) {
+  const generateBtn = container.querySelector('.sidebar-summary-generate-btn')
+  const resultDiv = container.querySelector('.sidebar-summary-result')
+
+  generateBtn?.addEventListener('click', async () => {
+    if (!resultDiv || !generateBtn) return
+
+    (generateBtn as HTMLButtonElement).disabled = true
+    generateBtn.textContent = 'Generating...'
+    resultDiv.classList.add('hidden')
+
+    try {
+      // Get auth data
+      let authData: { access_token?: string; user?: { id: string } } | null = null
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+        if (typeof authData === 'string') {
+          authData = JSON.parse(authData)
+        }
+      }
+
+      if (!authData?.access_token) {
+        throw new Error('Please log in via the extension popup first')
+      }
+
+      // Get conversation
+      const conversation = getFullConversation() || getLatestCustomerMessage() || ''
+      if (!conversation) {
+        throw new Error('Could not find ticket conversation')
+      }
+
+      const ticketId = getTicketId()
+
+      // Call summarize API
+      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          conversation,
+          ticketId,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to generate summary')
+      }
+
+      const data = await response.json()
+
+      resultDiv.innerHTML = `
+        <div class="sidebar-summary-card">
+          <p class="sidebar-summary-text">${data.summary}</p>
+          ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
+          ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
+        </div>
+      `
+      resultDiv.classList.remove('hidden')
+      showToast('Summary generated!', 'success')
+    } catch (error) {
+      resultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
+      resultDiv.classList.remove('hidden')
+    } finally {
+      (generateBtn as HTMLButtonElement).disabled = false
+      generateBtn.textContent = 'Refresh Summary'
+    }
+  })
 }
 
 // Initialize
