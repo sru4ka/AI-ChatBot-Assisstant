@@ -736,7 +736,8 @@ export function getFullConversation(): string | null {
     console.log('Freshdesk AI: Trying direct text parsing...')
 
     // Pattern to find message blocks: username + action + timestamp + content
-    const messageBlockPattern = /([a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?)\s+(reported via email|replied)\s*\n?\s*(?:\d+\s+(?:hours?|minutes?|days?|day|a day)\s+ago[^\n]*)\s*\n?\s*(?:To:[^\n]*\n?)?([\s\S]*?)(?=(?:[a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?\s+(?:reported via email|replied))|(?:\+\d+\s+conversations?)|(?:CONTACT DETAILS)|(?:TIMELINE)|(?:Reply\s+Add note)|$)/gi
+    // Timestamp can be "6 days ago", "a day ago", "an hour ago", "2 hours ago", etc.
+    const messageBlockPattern = /([a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?)\s+(reported via email|replied)\s*\n?\s*(?:(?:\d+|a|an)\s+(?:hours?|minutes?|days?|day|seconds?|second|weeks?|week)\s+ago[^\n]*)\s*\n?\s*(?:To:[^\n]*\n?)?([\s\S]*?)(?=(?:[a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?\s+(?:reported via email|replied))|(?:\+\d+\s+conversations?)|(?:CONTACT DETAILS)|(?:TIMELINE)|(?:Reply\s+Add note)|$)/gi
 
     let match
     const parsedMessages: Array<{ sender: 'customer' | 'agent', name: string, text: string }> = []
@@ -787,6 +788,71 @@ export function getFullConversation(): string | null {
           text: `From ${m.name}:\n${m.text}`
         })
       })
+    }
+
+    // Fallback: if pattern didn't capture messages, try a simpler line-by-line approach
+    if (messages.length === 0) {
+      console.log('Freshdesk AI: Trying simpler message detection...')
+
+      // Look for lines that indicate a new message start
+      const lines = bodyText.split('\n')
+      let currentMessage = ''
+      let currentSender: 'customer' | 'agent' = 'customer'
+      let foundMessages: Array<{ sender: 'customer' | 'agent', text: string }> = []
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim()
+
+        // Check if this line indicates a new message (someone replied)
+        const replyMatch = line.match(/^([a-zA-Z0-9._-]+(?:\s+[a-zA-Z]+)?)\s+(reported via email|replied)$/i)
+        if (replyMatch) {
+          // Save previous message if we have one
+          if (currentMessage.trim().length > 20) {
+            foundMessages.push({ sender: currentSender, text: currentMessage.trim() })
+          }
+
+          // Start new message
+          currentMessage = ''
+          const senderName = replyMatch[1].toLowerCase()
+          // Determine if agent or customer
+          currentSender = (agentName && senderName.includes(agentName.split(' ')[0])) ? 'agent' : 'customer'
+          continue
+        }
+
+        // Skip timestamp lines and metadata
+        if (/^(?:\d+|a|an)\s+(?:hours?|minutes?|days?|seconds?|weeks?)\s+ago/i.test(line)) continue
+        if (/^To:\s*[^\n]+$/i.test(line)) continue
+        if (/^Status:|^Priority:|^Type:|^Group:|^Tags:|CONTACT DETAILS|TIMELINE|PROPERTIES/i.test(line)) continue
+        if (line === '') continue
+
+        // Add to current message
+        if (currentMessage) currentMessage += '\n'
+        currentMessage += line
+      }
+
+      // Don't forget the last message
+      if (currentMessage.trim().length > 20) {
+        foundMessages.push({ sender: currentSender, text: currentMessage.trim() })
+      }
+
+      if (foundMessages.length > 0) {
+        console.log(`Freshdesk AI: Found ${foundMessages.length} messages via line-by-line parsing`)
+        foundMessages.forEach(m => {
+          // Clean up the message content
+          let cleanedText = m.text
+            .replace(/-------- Original message --------[\s\S]*$/i, '')
+            .replace(/Sent via the Samsung Galaxy[\s\S]*?smartphone/gi, '')
+            .replace(/Sent from my (?:iPhone|Android|iPad|mobile)[\s\S]*$/i, '')
+            .trim()
+
+          if (cleanedText.length > 10) {
+            messages.push({
+              sender: m.sender,
+              text: cleanedText.slice(0, 2000)
+            })
+          }
+        })
+      }
     }
   }
 
