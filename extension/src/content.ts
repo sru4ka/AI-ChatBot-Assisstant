@@ -319,6 +319,7 @@ function createPanel() {
       <div class="dropdown-tabs">
         <button class="dropdown-tab active" data-tab="settings">Settings</button>
         <button class="dropdown-tab" data-tab="order-info">Order Info</button>
+        <button class="dropdown-tab" data-tab="summary">Summary</button>
       </div>
       <div id="dropdown-tab-settings" class="dropdown-tab-content">
         <div class="dropdown-section">
@@ -345,6 +346,16 @@ function createPanel() {
             <button id="freshdesk-ai-search-orders" class="dropdown-save-btn">🔍 Search Orders</button>
           </div>
           <div class="order-info-results hidden"></div>
+        </div>
+      </div>
+      <div id="dropdown-tab-summary" class="dropdown-tab-content hidden">
+        <div id="summary-content" class="summary-content">
+          <div class="summary-loading hidden"><span class="spinner"></span> Generating summary...</div>
+          <div class="summary-empty">
+            <p>Generate an AI summary of this ticket conversation.</p>
+            <button id="freshdesk-ai-generate-summary" class="dropdown-save-btn">📝 Generate Summary</button>
+          </div>
+          <div class="summary-result hidden"></div>
         </div>
       </div>
     </div>
@@ -381,6 +392,7 @@ function setupEventListeners() {
   const regenerateBtn = document.getElementById('freshdesk-ai-regenerate')
   const regenInput = document.getElementById('freshdesk-ai-regen-input') as HTMLInputElement
   const searchOrdersBtn = document.getElementById('freshdesk-ai-search-orders')
+  const generateSummaryBtn = document.getElementById('freshdesk-ai-generate-summary')
 
   // Tab switching
   const dropdownTabs = panelContainer?.querySelectorAll('.dropdown-tab')
@@ -393,11 +405,15 @@ function setupEventListeners() {
       // Show/hide tab content
       document.getElementById('dropdown-tab-settings')?.classList.toggle('hidden', tabId !== 'settings')
       document.getElementById('dropdown-tab-order-info')?.classList.toggle('hidden', tabId !== 'order-info')
+      document.getElementById('dropdown-tab-summary')?.classList.toggle('hidden', tabId !== 'summary')
     })
   })
 
   // Search orders button
   searchOrdersBtn?.addEventListener('click', handleSearchOrders)
+
+  // Generate summary button
+  generateSummaryBtn?.addEventListener('click', handleGenerateSummary)
 
   // Add event listeners to all main buttons (there may be multiple)
   const mainBtns = document.querySelectorAll('.freshdesk-ai-main-btn')
@@ -1230,10 +1246,31 @@ async function handleSearchOrders() {
         ${order.noteAttributes && order.noteAttributes.length > 0 ? `
           <div class="order-note-attributes">
             ${order.noteAttributes.map((attr: { name: string; value: string }) => `
-              <div class="order-note"><strong>${attr.name}:</strong> ${attr.value}</div>
+              <div class="order-note"><strong>${attr.name}:</strong> ${linkifyEbayOrderIds(attr.value)}</div>
             `).join('')}
           </div>
         ` : ''}
+        ${(() => {
+          // Filter events that have a body (comments/notes)
+          const comments = order.events?.filter((e: { body: string | null }) => e.body) || []
+          if (comments.length === 0) return ''
+          return `
+            <details class="order-comments" open>
+              <summary class="order-comments-title">Comments (${comments.length})</summary>
+              <div class="comments-list">
+                ${comments.map((comment: { created_at: string; message: string; body: string | null; author: string | null }) => `
+                  <div class="comment-item">
+                    <div class="comment-header">
+                      ${comment.author ? `<span class="comment-author">${comment.author}</span>` : ''}
+                      <span class="comment-date">${new Date(comment.created_at).toLocaleString()}</span>
+                    </div>
+                    <div class="comment-body">${linkifyEbayOrderIds(comment.body || '')}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </details>
+          `
+        })()}
         <details class="order-timeline" open>
           <summary class="order-timeline-title">Timeline ${order.events && order.events.length > 0 ? `(${order.events.length} events)` : ''}</summary>
           <div class="timeline-events">
@@ -1381,6 +1418,137 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
     `
   } finally {
     btn.disabled = false
+  }
+}
+
+/**
+ * Convert eBay order IDs in text to clickable links
+ * Format: XX-XXXXX-XXXXX (e.g., 04-14081-51237, 25-14090-96590)
+ */
+function linkifyEbayOrderIds(text: string): string {
+  // Pattern for eBay order IDs: 2 digits - 5 digits - 5 digits
+  const ebayPattern = /(\d{2}-\d{4,5}-\d{4,5})/g
+  return text.replace(ebayPattern, (match) => {
+    const ebayUrl = `https://www.ebay.com/mye/myebay/purchase?page=1&q=${match}&mp=purchase-search-module-v2&type=v2&pg=purchase`
+    return `<a href="${ebayUrl}" target="_blank" class="ebay-order-link">${match}</a>`
+  })
+}
+
+/**
+ * Handle generating ticket summary
+ */
+async function handleGenerateSummary() {
+  const summaryContent = document.getElementById('summary-content')
+  const loadingEl = summaryContent?.querySelector('.summary-loading')
+  const emptyEl = summaryContent?.querySelector('.summary-empty')
+  const resultEl = summaryContent?.querySelector('.summary-result')
+
+  if (!summaryContent || !loadingEl || !emptyEl || !resultEl) return
+
+  // Show loading state
+  emptyEl.classList.add('hidden')
+  resultEl.classList.add('hidden')
+  loadingEl.classList.remove('hidden')
+
+  try {
+    // Get auth data
+    let authData: { access_token?: string; user?: { id: string } } | null = null
+    try {
+      if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+        if (typeof authData === 'string') {
+          authData = JSON.parse(authData)
+        }
+      }
+    } catch (e) {
+      throw new Error('Could not access extension storage')
+    }
+
+    if (!authData?.access_token) {
+      throw new Error('Please log in via the extension popup first')
+    }
+
+    // Get the conversation from the page
+    const conversation = getFullConversation() || getLatestCustomerMessage() || ''
+    if (!conversation) {
+      throw new Error('Could not find ticket conversation')
+    }
+
+    // Get ticket ID for context
+    const ticketId = getTicketId()
+
+    // Call the summarize-ticket function
+    const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authData.access_token}`,
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+      },
+      body: JSON.stringify({
+        businessId: authData.user?.id,
+        conversation,
+        ticketId,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || 'Failed to generate summary')
+    }
+
+    const data = await response.json()
+
+    // Display the summary
+    resultEl.innerHTML = `
+      <div class="summary-card">
+        <div class="summary-header">
+          <span class="summary-title">📋 Ticket Summary</span>
+          ${ticketId ? `<span class="summary-ticket">#${ticketId}</span>` : ''}
+        </div>
+        <div class="summary-body">${data.summary.replace(/\n/g, '<br>')}</div>
+        ${data.keyPoints && data.keyPoints.length > 0 ? `
+          <div class="summary-key-points">
+            <strong>Key Points:</strong>
+            <ul>
+              ${data.keyPoints.map((point: string) => `<li>${point}</li>`).join('')}
+            </ul>
+          </div>
+        ` : ''}
+        ${data.sentiment ? `
+          <div class="summary-sentiment">
+            <strong>Customer Sentiment:</strong>
+            <span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>
+          </div>
+        ` : ''}
+        ${data.actionNeeded ? `
+          <div class="summary-action">
+            <strong>Action Needed:</strong> ${data.actionNeeded}
+          </div>
+        ` : ''}
+      </div>
+      <button id="freshdesk-ai-refresh-summary" class="dropdown-save-btn" style="margin-top: 10px;">🔄 Refresh Summary</button>
+    `
+    resultEl.classList.remove('hidden')
+
+    // Add refresh button handler
+    document.getElementById('freshdesk-ai-refresh-summary')?.addEventListener('click', handleGenerateSummary)
+
+    showToast('Summary generated!', 'success')
+  } catch (error) {
+    console.error('Error generating summary:', error)
+    resultEl.innerHTML = `
+      <div class="summary-error">
+        <p>Error: ${error instanceof Error ? error.message : 'Failed to generate summary'}</p>
+        <button id="freshdesk-ai-retry-summary" class="dropdown-save-btn">Retry</button>
+      </div>
+    `
+    resultEl.classList.remove('hidden')
+
+    document.getElementById('freshdesk-ai-retry-summary')?.addEventListener('click', handleGenerateSummary)
+  } finally {
+    loadingEl.classList.add('hidden')
   }
 }
 
