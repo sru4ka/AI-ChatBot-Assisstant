@@ -1624,100 +1624,131 @@ function removeButton() {
 /**
  * Inject a summary button above the Freshdesk TIMELINE widget in the sidebar
  */
+// Track retry attempts for sidebar injection
+let sidebarInjectionAttempts = 0
+const MAX_SIDEBAR_INJECTION_ATTEMPTS = 10
+
 function injectSidebarSummaryButton() {
   // Don't inject if already present
   if (document.getElementById('freshdesk-ai-sidebar-summary-btn')) {
     return
   }
 
-  console.log('Freshdesk AI: Looking for TIMELINE widget in sidebar...')
+  console.log('Freshdesk AI: Looking for sidebar widgets... (attempt ' + (sidebarInjectionAttempts + 1) + ')')
 
-  // Strategy 1: Find any element containing "TIMELINE" text in the right sidebar area
-  // Freshdesk uses accordion-style widgets with text like "TIMELINE", "CONTACT DETAILS", etc.
-  const allElements = document.querySelectorAll('*')
+  // Helper to create the summary widget
+  const createSummaryWidget = (): HTMLElement => {
+    const summaryContainer = document.createElement('div')
+    summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
+    summaryContainer.className = 'freshdesk-ai-sidebar-widget'
+    summaryContainer.innerHTML = `
+      <div class="sidebar-summary-header">
+        <span>✨ AI SUMMARY</span>
+      </div>
+      <div class="sidebar-summary-content">
+        <button class="sidebar-summary-generate-btn">Generate Summary</button>
+        <div class="sidebar-summary-result hidden"></div>
+      </div>
+    `
+    return summaryContainer
+  }
 
-  for (const el of allElements) {
-    // Check if this element's direct text content is "TIMELINE"
-    const directText = Array.from(el.childNodes)
-      .filter(node => node.nodeType === Node.TEXT_NODE)
-      .map(node => node.textContent?.trim())
-      .join('')
+  // Strategy 1: Look for the right sidebar container (Freshdesk uses specific class patterns)
+  // The sidebar typically has classes like "ticket-details-sidebar", "right-container", etc.
+  const sidebarSelectors = [
+    '.ticket-details-sidebar',
+    '.right-container',
+    '[class*="sidebar"][class*="right"]',
+    '[class*="ticket-sidebar"]',
+    '.ticket-properties',
+    '[data-testid*="sidebar"]',
+    // MFE containers
+    '[class*="mfe__container"]',
+  ]
 
-    const fullText = el.textContent?.trim()
+  for (const selector of sidebarSelectors) {
+    const sidebar = document.querySelector(selector)
+    if (sidebar) {
+      console.log('Freshdesk AI: Found sidebar with selector:', selector)
 
-    if (directText === 'TIMELINE' || (fullText === 'TIMELINE' && el.children.length <= 1)) {
-      console.log('Freshdesk AI: Found TIMELINE element:', el.tagName, el.className)
+      // Look for accordion/collapsible sections inside
+      const accordionHeaders = sidebar.querySelectorAll('[class*="accordion"], [class*="collapsible"], [class*="expandable"], details > summary, [role="button"]')
 
-      // Find the parent accordion/widget container
-      let widgetContainer = el.closest('[class*="accordion"], [class*="widget"], [class*="panel"], [class*="collapse"], [class*="section"], .ember-view') as HTMLElement
-
-      // If no container found, try going up a few levels
-      if (!widgetContainer) {
-        widgetContainer = el.parentElement?.parentElement as HTMLElement
-      }
-
-      if (widgetContainer) {
-        console.log('Freshdesk AI: Found widget container:', widgetContainer.tagName, widgetContainer.className)
-
-        // Create and inject our summary widget
-        const summaryContainer = document.createElement('div')
-        summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
-        summaryContainer.className = 'freshdesk-ai-sidebar-widget'
-        summaryContainer.innerHTML = `
-          <div class="sidebar-summary-header">
-            <span>✨ AI SUMMARY</span>
-          </div>
-          <div class="sidebar-summary-content">
-            <button class="sidebar-summary-generate-btn">Generate Summary</button>
-            <div class="sidebar-summary-result hidden"></div>
-          </div>
-        `
-
-        // Insert before the Timeline widget
-        widgetContainer.parentElement?.insertBefore(summaryContainer, widgetContainer)
-        console.log('Freshdesk AI: Injected sidebar summary button above Timeline')
-
-        // Add click handler
-        attachSidebarSummaryHandler(summaryContainer)
-        return
+      for (const header of accordionHeaders) {
+        const headerText = header.textContent?.trim().toUpperCase()
+        if (headerText?.includes('TIMELINE') || headerText?.includes('ACTIVITY')) {
+          console.log('Freshdesk AI: Found TIMELINE accordion header')
+          const container = header.closest('details, [class*="accordion"], [class*="section"]') || header.parentElement
+          if (container) {
+            const summaryWidget = createSummaryWidget()
+            container.parentElement?.insertBefore(summaryWidget, container)
+            attachSidebarSummaryHandler(summaryWidget)
+            console.log('Freshdesk AI: Injected sidebar summary button')
+            return
+          }
+        }
       }
     }
   }
 
-  // Strategy 2: Look for CONTACT DETAILS and insert after it (TIMELINE is usually right after)
-  for (const el of allElements) {
-    const text = el.textContent?.trim()
-    if (text === 'CONTACT DETAILS' && el.children.length <= 1) {
-      let widgetContainer = el.closest('[class*="accordion"], [class*="widget"], [class*="panel"], .ember-view') as HTMLElement
-      if (!widgetContainer) {
-        widgetContainer = el.parentElement?.parentElement as HTMLElement
-      }
+  // Strategy 2: Search all elements for TIMELINE text (case-insensitive)
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null)
+  let textNode: Text | null
 
-      if (widgetContainer && widgetContainer.nextElementSibling) {
-        console.log('Freshdesk AI: Found CONTACT DETAILS, inserting summary after it')
+  while ((textNode = walker.nextNode() as Text | null)) {
+    const text = textNode.textContent?.trim().toUpperCase()
+    if (text === 'TIMELINE' || text === 'ACTIVITY LOG' || text === 'TICKET ACTIVITY') {
+      const parent = textNode.parentElement
+      if (parent) {
+        console.log('Freshdesk AI: Found TIMELINE text in:', parent.tagName, parent.className)
 
-        const summaryContainer = document.createElement('div')
-        summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
-        summaryContainer.className = 'freshdesk-ai-sidebar-widget'
-        summaryContainer.innerHTML = `
-          <div class="sidebar-summary-header">
-            <span>✨ AI SUMMARY</span>
-          </div>
-          <div class="sidebar-summary-content">
-            <button class="sidebar-summary-generate-btn">Generate Summary</button>
-            <div class="sidebar-summary-result hidden"></div>
-          </div>
-        `
+        // Go up to find a suitable container (accordion section, details, div with class)
+        let container: HTMLElement | null = parent
+        for (let i = 0; i < 5 && container; i++) {
+          const classes = container.className || ''
+          if (classes.includes('accordion') || classes.includes('section') ||
+              classes.includes('widget') || classes.includes('collapsible') ||
+              container.tagName === 'DETAILS') {
+            console.log('Freshdesk AI: Found widget container:', container.tagName, container.className)
+            const summaryWidget = createSummaryWidget()
+            container.parentElement?.insertBefore(summaryWidget, container)
+            attachSidebarSummaryHandler(summaryWidget)
+            console.log('Freshdesk AI: Injected sidebar summary button')
+            return
+          }
+          container = container.parentElement
+        }
 
-        // Insert after CONTACT DETAILS (before TIMELINE)
-        widgetContainer.parentElement?.insertBefore(summaryContainer, widgetContainer.nextElementSibling)
-        attachSidebarSummaryHandler(summaryContainer)
-        return
+        // Fallback: just insert before the parent's parent
+        if (parent.parentElement?.parentElement) {
+          const summaryWidget = createSummaryWidget()
+          parent.parentElement.parentElement.insertBefore(summaryWidget, parent.parentElement)
+          attachSidebarSummaryHandler(summaryWidget)
+          console.log('Freshdesk AI: Injected sidebar summary button (fallback)')
+          return
+        }
       }
     }
   }
 
-  console.log('Freshdesk AI: Could not find Timeline widget to inject summary button')
+  // Strategy 3: Look for PROPERTIES section (another common sidebar section)
+  const propsSection = document.querySelector('[class*="properties"], [class*="ticket-fields"]')
+  if (propsSection) {
+    console.log('Freshdesk AI: Found PROPERTIES section, inserting after it')
+    const summaryWidget = createSummaryWidget()
+    propsSection.parentElement?.insertBefore(summaryWidget, propsSection.nextSibling)
+    attachSidebarSummaryHandler(summaryWidget)
+    return
+  }
+
+  // If not found, retry with delay (MFE components load asynchronously)
+  sidebarInjectionAttempts++
+  if (sidebarInjectionAttempts < MAX_SIDEBAR_INJECTION_ATTEMPTS) {
+    console.log('Freshdesk AI: Sidebar not ready, retrying in 1s...')
+    setTimeout(injectSidebarSummaryButton, 1000)
+  } else {
+    console.log('Freshdesk AI: Could not find sidebar after ' + MAX_SIDEBAR_INJECTION_ATTEMPTS + ' attempts')
+  }
 }
 
 /**
@@ -1818,8 +1849,13 @@ function init() {
       console.log('URL changed:', lastUrl)
 
       if (isOnTicketPage()) {
+        // Reset sidebar injection attempts for new ticket
+        sidebarInjectionAttempts = 0
+
         setTimeout(() => {
           injectInlineButton()
+          // Also try to inject sidebar summary button on new ticket
+          setTimeout(() => injectSidebarSummaryButton(), 500)
         }, 1000)
       } else {
         removeFloatingButton()

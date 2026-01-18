@@ -7,7 +7,7 @@ const corsHeaders = {
 interface RequestBody {
   businessId: string
   trackingNumber: string
-  carrier?: string // optional carrier code
+  carrier?: string
   trackingUrl?: string // optional tracking URL for scraping fallback
 }
 
@@ -27,6 +27,7 @@ interface TrackingResult {
   lastUpdate: string | null
   events: TrackingEvent[]
   error?: string
+  source?: string
 }
 
 // Map TrackingMore status to readable descriptions
@@ -101,7 +102,7 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
           console.log(`Found keyword "${keyword}" - status: ${status}`)
 
           // Try to extract days to delivery
-          let daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
+          const daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
           let extraInfo = ''
           if (daysMatch) {
             extraInfo = ` (Est. ${daysMatch[1]} days)`
