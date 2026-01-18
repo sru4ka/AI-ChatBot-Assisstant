@@ -8,6 +8,7 @@ interface RequestBody {
   businessId: string
   trackingNumber: string
   carrier?: string // optional carrier code
+  trackingUrl?: string // optional tracking URL for scraping fallback
 }
 
 interface TrackingEvent {
@@ -56,6 +57,76 @@ const carrierCodes: Record<string, string> = {
   'cainiao': 'cainiao',
   'amazon': 'amazon-fba-usa',
   'aliexpress': 'aliexpress-standard-shipping',
+}
+
+/**
+ * Scrape a tracking URL for status keywords
+ * Returns a basic status based on keywords found in the page
+ */
+async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusDescription: string; rawText?: string } | null> {
+  try {
+    console.log('Scraping tracking URL:', url)
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      },
+    })
+
+    if (!response.ok) {
+      console.log('Scrape failed with status:', response.status)
+      return null
+    }
+
+    const html = await response.text()
+    const textLower = html.toLowerCase()
+
+    // Look for status keywords in priority order
+    const statusKeywords: Array<{ keywords: string[]; status: string; description: string }> = [
+      { keywords: ['delivered', 'delivery completed', 'has been delivered', 'was delivered', 'package delivered'], status: 'delivered', description: 'Delivered' },
+      { keywords: ['out for delivery', 'out-for-delivery', 'on vehicle for delivery'], status: 'out_for_delivery', description: 'Out for Delivery' },
+      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route'], status: 'transit', description: 'In Transit' },
+      { keywords: ['arrived at', 'departed from', 'processed', 'arrived at destination'], status: 'transit', description: 'In Transit' },
+      { keywords: ['pickup scheduled', 'ready for pickup', 'available for pickup'], status: 'pickup', description: 'Ready for Pickup' },
+      { keywords: ['shipped', 'dispatched', 'label created', 'shipping label', 'order shipped'], status: 'shipped', description: 'Shipped' },
+      { keywords: ['exception', 'delivery attempt', 'delivery failed', 'unable to deliver', 'returned'], status: 'exception', description: 'Exception' },
+      { keywords: ['pending', 'awaiting shipment', 'not yet shipped', 'processing'], status: 'pending', description: 'Pending' },
+    ]
+
+    for (const { keywords, status, description } of statusKeywords) {
+      for (const keyword of keywords) {
+        if (textLower.includes(keyword)) {
+          console.log(`Found keyword "${keyword}" - status: ${status}`)
+
+          // Try to extract days to delivery
+          let daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
+          let extraInfo = ''
+          if (daysMatch) {
+            extraInfo = ` (Est. ${daysMatch[1]} days)`
+          }
+
+          // Try to extract delivery date
+          const dateMatch = html.match(/(?:estimated|expected|delivery)[\s:]+(?:by\s+)?([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i)
+          if (dateMatch && !extraInfo) {
+            extraInfo = ` (Est. ${dateMatch[1]})`
+          }
+
+          return {
+            status,
+            statusDescription: description + extraInfo,
+          }
+        }
+      }
+    }
+
+    console.log('No status keywords found in page')
+    return null
+  } catch (error) {
+    console.error('Error scraping tracking URL:', error)
+    return null
+  }
 }
 
 /**
@@ -128,7 +199,7 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    const { businessId, trackingNumber, carrier }: RequestBody = await req.json()
+    const { businessId, trackingNumber, carrier, trackingUrl }: RequestBody = await req.json()
 
     if (!businessId || !trackingNumber) {
       return new Response(
@@ -140,15 +211,38 @@ Deno.serve(async (req: Request) => {
     // Use global TrackingMore API key from environment variable
     const trackingApiKey = Deno.env.get('TRACKINGMORE_API_KEY')
 
+    // If no API key, try scraping as primary method
     if (!trackingApiKey) {
+      console.log('No API key, trying URL scraping...')
+
+      if (trackingUrl) {
+        const scraped = await scrapeTrackingUrl(trackingUrl)
+        if (scraped) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              trackingNumber,
+              carrier: carrier || null,
+              status: scraped.status,
+              statusDescription: scraped.statusDescription,
+              estimatedDelivery: null,
+              lastUpdate: null,
+              events: [],
+              source: 'scraped',
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+
       return new Response(
         JSON.stringify({
           success: false,
-          error: 'Tracking API not configured on server.',
+          error: 'Tracking API not configured and scraping failed.',
           trackingNumber,
           carrier: null,
           status: 'not_configured',
-          statusDescription: 'Tracking API not configured',
+          statusDescription: 'Tracking unavailable',
           estimatedDelivery: null,
           lastUpdate: null,
           events: [],
@@ -202,8 +296,31 @@ Deno.serve(async (req: Request) => {
       events: [],
     }
 
-    // Check for API errors
+    // Check for API errors - try scraping as fallback
     if (trackData.meta?.code !== 200) {
+      console.log('API failed, trying URL scraping fallback...')
+
+      // Try scraping the tracking URL if provided
+      if (trackingUrl) {
+        const scraped = await scrapeTrackingUrl(trackingUrl)
+        if (scraped) {
+          return new Response(
+            JSON.stringify({
+              success: true,
+              trackingNumber: cleanTrackingNumber,
+              carrier: carrierCode || null,
+              status: scraped.status,
+              statusDescription: scraped.statusDescription,
+              estimatedDelivery: null,
+              lastUpdate: null,
+              events: [],
+              source: 'scraped',
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+        }
+      }
+
       result.success = false
       result.error = trackData.meta?.message || 'API error'
       result.status = 'error'

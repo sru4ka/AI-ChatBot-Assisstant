@@ -1251,9 +1251,9 @@ async function handleSearchOrders() {
             </div>
             <div class="tracking-info">
               ${order.trackingNumbers.map((num: string, i: number) => `
-                <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">
+                <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">
                   <span>${order.trackingCompanies?.[i] || 'Carrier'}: <strong>${num}</strong></span>
-                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}">Refresh</button>
+                  <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Refresh</button>
                   ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
                 </div>
                 <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
@@ -1327,8 +1327,9 @@ async function handleSearchOrders() {
         const target = e.target as HTMLElement
         const trackingNumber = target.dataset.tracking
         const carrier = target.dataset.carrier
+        const trackingUrl = target.dataset.url // For URL scraping fallback
         if (trackingNumber) {
-          await handleGetTrackingStatus(trackingNumber, carrier || '', authData)
+          await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl)
         }
       })
     })
@@ -1337,8 +1338,9 @@ async function handleSearchOrders() {
     trackingButtons.forEach(async (btn) => {
       const trackingNumber = (btn as HTMLElement).dataset.tracking
       const carrier = (btn as HTMLElement).dataset.carrier
+      const trackingUrl = (btn as HTMLElement).dataset.url
       if (trackingNumber) {
-        await handleGetTrackingStatus(trackingNumber, carrier || '', authData)
+        await handleGetTrackingStatus(trackingNumber, carrier || '', authData, trackingUrl)
       }
     })
   } catch (error) {
@@ -1358,8 +1360,8 @@ async function handleSearchOrders() {
   }
 }
 
-// Fetch detailed tracking status from TrackingMore
-async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }) {
+// Fetch detailed tracking status (API with URL scraping fallback)
+async function handleGetTrackingStatus(trackingNumber: string, carrier: string, authData: { access_token: string; user?: { id: string } }, trackingUrl?: string) {
   const detailsId = `tracking-details-${trackingNumber.replace(/[^a-zA-Z0-9]/g, '')}`
   const detailsEl = document.getElementById(detailsId)
   const btn = document.querySelector(`button[data-tracking="${trackingNumber}"]`) as HTMLButtonElement
@@ -1384,6 +1386,7 @@ async function handleGetTrackingStatus(trackingNumber: string, carrier: string, 
         businessId: authData.user?.id,
         trackingNumber,
         carrier: carrier || undefined,
+        trackingUrl: trackingUrl || undefined, // For URL scraping fallback
       }),
     })
 
@@ -1465,7 +1468,7 @@ function linkifyOrderIds(text: string): string {
   })
 
   // Then, replace AliExpress order IDs (if not already inside a link)
-  result = result.replace(aliexpressPattern, (match, group, offset, string) => {
+  result = result.replace(aliexpressPattern, (match, _group, offset, string) => {
     // Check if this number is already inside an anchor tag (already linked)
     const before = string.substring(Math.max(0, offset - 50), offset)
     if (before.includes('<a ') && !before.includes('</a>')) {
