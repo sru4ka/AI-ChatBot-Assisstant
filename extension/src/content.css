@@ -1317,6 +1317,35 @@
   padding: 12px;
 }
 
+/* Sidebar loading spinner */
+.sidebar-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.sidebar-loading.hidden {
+  display: none;
+}
+
+.sidebar-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e5e7eb;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: sidebar-spin 0.8s linear infinite;
+}
+
+.sidebar-order-content .sidebar-spinner {
+  border-top-color: #10b981;
+}
+
+@keyframes sidebar-spin {
+  to { transform: rotate(360deg); }
+}
+
 .sidebar-summary-generate-btn {
   width: 100%;
   padding: 10px 16px;

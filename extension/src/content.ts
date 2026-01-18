@@ -1935,7 +1935,8 @@ function injectSidebarSummaryButton() {
           <span>✨ AI SUMMARY</span>
         </div>
         <div class="sidebar-summary-content">
-          <button class="sidebar-summary-generate-btn">Generate Summary</button>
+          <div class="sidebar-loading"><span class="sidebar-spinner"></span></div>
+          <button class="sidebar-summary-generate-btn hidden">Refresh</button>
           <div class="sidebar-summary-result hidden"></div>
         </div>
       </div>
@@ -1944,7 +1945,8 @@ function injectSidebarSummaryButton() {
           <span>📦 ORDER INFO</span>
         </div>
         <div class="sidebar-order-content">
-          <button class="sidebar-order-fetch-btn">Fetch Orders</button>
+          <div class="sidebar-loading"><span class="sidebar-spinner"></span></div>
+          <button class="sidebar-order-fetch-btn hidden">Refresh</button>
           <div class="sidebar-order-result hidden"></div>
         </div>
       </div>
@@ -2065,7 +2067,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
     if (!resultDiv || !generateBtn) return
 
     (generateBtn as HTMLButtonElement).disabled = true
-    generateBtn.textContent = 'Generating...'
+    generateBtn.textContent = 'Refreshing...'
     resultDiv.classList.add('hidden')
 
     try {
@@ -2131,7 +2133,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
       resultDiv.classList.remove('hidden')
     } finally {
       (generateBtn as HTMLButtonElement).disabled = false
-      generateBtn.textContent = 'Refresh Summary'
+      generateBtn.textContent = 'Refresh'
     }
   })
 
@@ -2143,7 +2145,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
     if (!orderResultDiv || !orderBtn) return
 
     (orderBtn as HTMLButtonElement).disabled = true
-    orderBtn.textContent = 'Fetching...'
+    orderBtn.textContent = 'Refreshing...'
     orderResultDiv.classList.add('hidden')
 
     try {
@@ -2243,7 +2245,7 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
       orderResultDiv.classList.remove('hidden')
     } finally {
       (orderBtn as HTMLButtonElement).disabled = false
-      orderBtn.textContent = 'Refresh Orders'
+      orderBtn.textContent = 'Refresh'
     }
   })
 }
@@ -2359,14 +2361,18 @@ function autoDisplaySidebarOrders() {
   if (!preloadedOrderData) return
 
   const orderResultDiv = document.querySelector('.sidebar-order-result')
-  const orderBtn = document.querySelector('.sidebar-order-fetch-btn')
+  const orderBtn = document.querySelector('.sidebar-order-fetch-btn') as HTMLElement | null
+  const orderLoading = document.querySelector('.sidebar-order-content .sidebar-loading') as HTMLElement | null
   if (!orderResultDiv || !orderBtn) return
+
+  // Hide loading spinner, show refresh button
+  if (orderLoading) orderLoading.classList.add('hidden')
+  orderBtn.classList.remove('hidden')
 
   const data = preloadedOrderData as { orders?: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[]; adminUrl?: string }[] }
   if (!data.orders || data.orders.length === 0) {
     orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
     orderResultDiv.classList.remove('hidden')
-    orderBtn.textContent = 'Refresh Orders'
     return
   }
 
@@ -2388,7 +2394,6 @@ function autoDisplaySidebarOrders() {
     </a>
   `).join('')
   orderResultDiv.classList.remove('hidden')
-  orderBtn.textContent = 'Refresh Orders'
   console.log('Freshdesk AI: Auto-displayed sidebar orders')
 }
 
@@ -2397,8 +2402,13 @@ function autoDisplaySidebarSummary() {
   if (!preloadedSummaryData) return
 
   const resultDiv = document.querySelector('.sidebar-summary-result')
-  const generateBtn = document.querySelector('.sidebar-summary-generate-btn')
+  const generateBtn = document.querySelector('.sidebar-summary-generate-btn') as HTMLElement | null
+  const summaryLoading = document.querySelector('.sidebar-summary-content .sidebar-loading') as HTMLElement | null
   if (!resultDiv || !generateBtn) return
+
+  // Hide loading spinner, show refresh button
+  if (summaryLoading) summaryLoading.classList.add('hidden')
+  generateBtn.classList.remove('hidden')
 
   const data = preloadedSummaryData as { summary?: string; keyPoints?: string[]; sentiment?: string; actionNeeded?: string }
   if (!data.summary) return
@@ -2416,7 +2426,6 @@ function autoDisplaySidebarSummary() {
     </div>
   `
   resultDiv.classList.remove('hidden')
-  generateBtn.textContent = 'Refresh Summary'
   console.log('Freshdesk AI: Auto-displayed sidebar summary')
 }
 
