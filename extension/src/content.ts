@@ -406,6 +406,23 @@ function setupEventListeners() {
       document.getElementById('dropdown-tab-settings')?.classList.toggle('hidden', tabId !== 'settings')
       document.getElementById('dropdown-tab-order-info')?.classList.toggle('hidden', tabId !== 'order-info')
       document.getElementById('dropdown-tab-summary')?.classList.toggle('hidden', tabId !== 'summary')
+
+      // Auto-load content when switching tabs
+      if (tabId === 'order-info') {
+        // Auto-search orders if not already loaded
+        const resultsEl = document.getElementById('order-info-results')
+        const loadingEl = document.getElementById('order-info-loading')
+        if (resultsEl && !resultsEl.innerHTML.includes('order-card') && !loadingEl?.classList.contains('hidden') === false) {
+          handleSearchOrders()
+        }
+      } else if (tabId === 'summary') {
+        // Auto-generate summary if not already generated
+        const summaryResult = document.getElementById('summary-result')
+        const summaryLoading = document.querySelector('.summary-loading')
+        if (summaryResult && !summaryResult.innerHTML.trim() && summaryLoading?.classList.contains('hidden')) {
+          handleGenerateSummary()
+        }
+      }
     })
   })
 
@@ -1220,8 +1237,8 @@ async function handleSearchOrders() {
       }
     }
 
-    // Limit to 5 most recent orders
-    filteredOrders = filteredOrders.slice(0, 5)
+    // Limit to 10 most recent orders
+    filteredOrders = filteredOrders.slice(0, 10)
 
     // Render orders
     resultsEl.innerHTML = filteredOrders.map((order: ShopifyOrderResult) => `
@@ -1636,22 +1653,36 @@ function injectSidebarSummaryButton() {
 
   console.log('Freshdesk AI: Looking for sidebar widgets... (attempt ' + (sidebarInjectionAttempts + 1) + ')')
 
-  // Helper to create the summary widget
-  const createSummaryWidget = (): HTMLElement => {
-    const summaryContainer = document.createElement('div')
-    summaryContainer.id = 'freshdesk-ai-sidebar-summary-btn'
-    summaryContainer.className = 'freshdesk-ai-sidebar-widget'
-    summaryContainer.innerHTML = `
-      <div class="sidebar-summary-header">
-        <span>✨ AI SUMMARY</span>
+  // Helper to create the sidebar widgets (Summary + Order Info)
+  const createSidebarWidgets = (): HTMLElement => {
+    const container = document.createElement('div')
+    container.id = 'freshdesk-ai-sidebar-summary-btn'
+    container.className = 'freshdesk-ai-sidebar-widgets-container'
+    container.innerHTML = `
+      <div class="freshdesk-ai-sidebar-widget">
+        <div class="sidebar-summary-header">
+          <span>✨ AI SUMMARY</span>
+        </div>
+        <div class="sidebar-summary-content">
+          <button class="sidebar-summary-generate-btn">Generate Summary</button>
+          <div class="sidebar-summary-result hidden"></div>
+        </div>
       </div>
-      <div class="sidebar-summary-content">
-        <button class="sidebar-summary-generate-btn">Generate Summary</button>
-        <div class="sidebar-summary-result hidden"></div>
+      <div class="freshdesk-ai-sidebar-widget sidebar-order-widget">
+        <div class="sidebar-order-header">
+          <span>📦 ORDER INFO</span>
+        </div>
+        <div class="sidebar-order-content">
+          <button class="sidebar-order-fetch-btn">Fetch Orders</button>
+          <div class="sidebar-order-result hidden"></div>
+        </div>
       </div>
     `
-    return summaryContainer
+    return container
   }
+
+  // Legacy function for backwards compatibility
+  const createSummaryWidget = createSidebarWidgets
 
   // Strategy 1: Look for the right sidebar container (Freshdesk uses specific class patterns)
   // The sidebar typically has classes like "ticket-details-sidebar", "right-container", etc.
@@ -1752,9 +1783,10 @@ function injectSidebarSummaryButton() {
 }
 
 /**
- * Attach click handler to sidebar summary button
+ * Attach click handlers to sidebar widgets (Summary + Order Info)
  */
 function attachSidebarSummaryHandler(container: HTMLElement) {
+  // Summary widget handler
   const generateBtn = container.querySelector('.sidebar-summary-generate-btn')
   const resultDiv = container.querySelector('.sidebar-summary-result')
 
@@ -1812,6 +1844,11 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
       resultDiv.innerHTML = `
         <div class="sidebar-summary-card">
           <p class="sidebar-summary-text">${data.summary}</p>
+          ${data.keyPoints && data.keyPoints.length > 0 ? `
+            <ul class="sidebar-key-points">
+              ${data.keyPoints.map((point: string) => `<li>${point}</li>`).join('')}
+            </ul>
+          ` : ''}
           ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
           ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
         </div>
@@ -1824,6 +1861,102 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
     } finally {
       (generateBtn as HTMLButtonElement).disabled = false
       generateBtn.textContent = 'Refresh Summary'
+    }
+  })
+
+  // Order Info widget handler
+  const orderBtn = container.querySelector('.sidebar-order-fetch-btn')
+  const orderResultDiv = container.querySelector('.sidebar-order-result')
+
+  orderBtn?.addEventListener('click', async () => {
+    if (!orderResultDiv || !orderBtn) return
+
+    (orderBtn as HTMLButtonElement).disabled = true
+    orderBtn.textContent = 'Fetching...'
+    orderResultDiv.classList.add('hidden')
+
+    try {
+      // Get auth data
+      let authData: { access_token?: string; user?: { id: string } } | null = null
+      if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+        const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+        authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+        if (typeof authData === 'string') {
+          authData = JSON.parse(authData)
+        }
+      }
+
+      if (!authData?.access_token) {
+        throw new Error('Please log in first')
+      }
+
+      // Extract customer info
+      const customerInfo = extractCustomerInfo()
+      const searchQueries: string[] = []
+      if (customerInfo.orderNumber) searchQueries.push(`#${customerInfo.orderNumber}`)
+      if (customerInfo.email) searchQueries.push(customerInfo.email)
+      else if (customerInfo.name) searchQueries.push(customerInfo.name)
+
+      if (searchQueries.length === 0) {
+        throw new Error('No customer info found')
+      }
+
+      // Fetch orders
+      const response = await fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/search-shopify-orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          searchQueries,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!data.orders || data.orders.length === 0) {
+        orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
+        orderResultDiv.classList.remove('hidden')
+        return
+      }
+
+      // Filter by email if available
+      let orders = data.orders
+      if (customerInfo.email) {
+        const emailLower = customerInfo.email.toLowerCase()
+        const filtered = orders.filter((o: { email?: string }) => o.email?.toLowerCase() === emailLower)
+        if (filtered.length > 0) orders = filtered
+      }
+      orders = orders.slice(0, 5) // Limit to 5
+
+      // Render compact order cards
+      orderResultDiv.innerHTML = orders.map((order: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[] }) => `
+        <div class="sidebar-order-card">
+          <div class="sidebar-order-row">
+            <span class="sidebar-order-name">${order.name}</span>
+            <span class="sidebar-order-date">${new Date(order.date).toLocaleDateString()}</span>
+          </div>
+          <div class="sidebar-order-row">
+            <span class="sidebar-order-status ${order.status}">${order.status}</span>
+            ${order.fulfillmentStatus ? `<span class="sidebar-order-status ${order.fulfillmentStatus}">${order.fulfillmentStatus}</span>` : ''}
+            <span class="sidebar-order-total">${order.total}</span>
+          </div>
+          ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
+            <div class="sidebar-order-tracking">📦 ${order.trackingNumbers[0]}</div>
+          ` : ''}
+        </div>
+      `).join('')
+      orderResultDiv.classList.remove('hidden')
+      showToast(`Found ${orders.length} order(s)`, 'success')
+    } catch (error) {
+      orderResultDiv.innerHTML = `<p class="sidebar-summary-error">${error instanceof Error ? error.message : 'Error'}</p>`
+      orderResultDiv.classList.remove('hidden')
+    } finally {
+      (orderBtn as HTMLButtonElement).disabled = false
+      orderBtn.textContent = 'Refresh Orders'
     }
   })
 }

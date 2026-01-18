@@ -1363,6 +1363,18 @@
   margin: 0 0 8px 0;
 }
 
+.sidebar-key-points {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #4b5563;
+  line-height: 1.4;
+}
+
+.sidebar-key-points li {
+  margin-bottom: 4px;
+}
+
 .sidebar-summary-card .sentiment-badge {
   font-size: 10px;
   padding: 2px 6px;
@@ -1388,5 +1400,152 @@
   padding: 10px;
   border-radius: 6px;
   text-align: center;
+  margin: 0;
+}
+
+/* Sidebar Widgets Container */
+.freshdesk-ai-sidebar-widgets-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Order Info Widget */
+.sidebar-order-widget {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #6ee7b7;
+}
+
+.sidebar-order-header {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: white;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.sidebar-order-header span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-order-content {
+  padding: 12px;
+}
+
+.sidebar-order-fetch-btn {
+  width: 100%;
+  padding: 10px 16px;
+  background: #059669;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sidebar-order-fetch-btn:hover:not(:disabled) {
+  background: #047857;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+}
+
+.sidebar-order-fetch-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sidebar-order-result {
+  margin-top: 10px;
+}
+
+.sidebar-order-result.hidden {
+  display: none;
+}
+
+.sidebar-order-card {
+  background: white;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid #d1fae5;
+  margin-bottom: 6px;
+}
+
+.sidebar-order-card:last-child {
+  margin-bottom: 0;
+}
+
+.sidebar-order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sidebar-order-row:last-child {
+  margin-bottom: 0;
+}
+
+.sidebar-order-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #059669;
+}
+
+.sidebar-order-date {
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.sidebar-order-status {
+  font-size: 9px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #e5e7eb;
+  color: #374151;
+  text-transform: capitalize;
+}
+
+.sidebar-order-status.paid {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.sidebar-order-status.fulfilled {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.sidebar-order-status.unfulfilled {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.sidebar-order-total {
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.sidebar-order-tracking {
+  font-size: 10px;
+  color: #6b7280;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.sidebar-order-empty {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  padding: 10px;
   margin: 0;
 }
