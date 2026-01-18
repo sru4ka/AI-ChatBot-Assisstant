@@ -25,6 +25,12 @@ let panelContainer: HTMLElement | null = null
 let isGenerating = false
 let generatedReply = ''
 
+// Preloaded data cache for instant display
+let preloadedOrderData: unknown = null
+let preloadedSummaryData: unknown = null
+let isPreloadingOrders = false
+let isPreloadingSummary = false
+
 // Current settings
 let currentTone: 'professional' | 'friendly' | 'concise' = 'professional'
 let currentCustomPrompt = ''
@@ -2049,6 +2055,186 @@ function attachSidebarSummaryHandler(container: HTMLElement) {
   })
 }
 
+// Preload Order Info and Summary in background for instant display
+async function preloadTicketData() {
+  console.log('Freshdesk AI: Starting background preload...')
+
+  // Get auth data first
+  let authData: { access_token?: string; user?: { id: string } } | null = null
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      const sessionData = await chrome.storage.local.get(['sb-iyeqiwixenjiakeisdae-auth-token'])
+      authData = sessionData['sb-iyeqiwixenjiakeisdae-auth-token']
+      if (typeof authData === 'string') {
+        authData = JSON.parse(authData)
+      }
+    }
+  } catch (e) {
+    console.log('Freshdesk AI: Could not get auth for preload')
+    return
+  }
+
+  if (!authData?.access_token) {
+    console.log('Freshdesk AI: Not logged in, skipping preload')
+    return
+  }
+
+  // Extract customer info
+  const customerInfo = extractCustomerInfo()
+  console.log('Freshdesk AI: Preload - customer info:', customerInfo)
+
+  // Preload Order Info
+  if (!isPreloadingOrders && !preloadedOrderData) {
+    isPreloadingOrders = true
+    let searchQuery = ''
+    if (customerInfo.email) {
+      searchQuery = customerInfo.email
+    } else if (customerInfo.orderNumber) {
+      searchQuery = `#${customerInfo.orderNumber}`
+    } else if (customerInfo.name) {
+      searchQuery = customerInfo.name
+    }
+
+    if (searchQuery) {
+      console.log('Freshdesk AI: Preloading orders with query:', searchQuery)
+      fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/shopify-orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          searchQuery,
+        }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          preloadedOrderData = data
+          isPreloadingOrders = false
+          console.log('Freshdesk AI: Orders preloaded successfully', data.orders?.length || 0, 'orders')
+          // Auto-trigger sidebar order display if widget exists
+          autoDisplaySidebarOrders()
+        })
+        .catch(err => {
+          console.log('Freshdesk AI: Order preload failed', err)
+          isPreloadingOrders = false
+        })
+    }
+  }
+
+  // Preload Summary
+  if (!isPreloadingSummary && !preloadedSummaryData) {
+    isPreloadingSummary = true
+    const conversation = getFullConversation() || getLatestCustomerMessage() || ''
+    const ticketId = getTicketId()
+
+    if (conversation) {
+      console.log('Freshdesk AI: Preloading summary...')
+      fetch('https://iyeqiwixenjiakeisdae.supabase.co/functions/v1/summarize-ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.access_token}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml5ZXFpd2l4ZW5qaWFrZWlzZGFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyMjQ0ODMsImV4cCI6MjA4MzgwMDQ4M30.1IFITfO7xh-cXCYarz4pJTqwMCpBSHgHaK6yxbzT3rc',
+        },
+        body: JSON.stringify({
+          businessId: authData.user?.id,
+          conversation,
+          ticketId,
+        }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          preloadedSummaryData = data
+          isPreloadingSummary = false
+          console.log('Freshdesk AI: Summary preloaded successfully')
+          // Auto-trigger sidebar summary display if widget exists
+          autoDisplaySidebarSummary()
+        })
+        .catch(err => {
+          console.log('Freshdesk AI: Summary preload failed', err)
+          isPreloadingSummary = false
+        })
+    }
+  }
+}
+
+// Auto-display preloaded orders in sidebar widget
+function autoDisplaySidebarOrders() {
+  if (!preloadedOrderData) return
+
+  const orderResultDiv = document.querySelector('.sidebar-order-result')
+  const orderBtn = document.querySelector('.sidebar-order-fetch-btn')
+  if (!orderResultDiv || !orderBtn) return
+
+  const data = preloadedOrderData as { orders?: { name: string; date: string; status: string; fulfillmentStatus: string | null; total: string; trackingNumbers?: string[] }[] }
+  if (!data.orders || data.orders.length === 0) {
+    orderResultDiv.innerHTML = `<p class="sidebar-order-empty">No orders found</p>`
+    orderResultDiv.classList.remove('hidden')
+    orderBtn.textContent = 'Refresh Orders'
+    return
+  }
+
+  const orders = data.orders.slice(0, 5)
+  orderResultDiv.innerHTML = orders.map(order => `
+    <div class="sidebar-order-card">
+      <div class="sidebar-order-row">
+        <span class="sidebar-order-name">${order.name}</span>
+        <span class="sidebar-order-date">${new Date(order.date).toLocaleDateString()}</span>
+      </div>
+      <div class="sidebar-order-row">
+        <span class="sidebar-order-status ${order.status}">${order.status}</span>
+        ${order.fulfillmentStatus ? `<span class="sidebar-order-status ${order.fulfillmentStatus}">${order.fulfillmentStatus}</span>` : ''}
+        <span class="sidebar-order-total">${order.total}</span>
+      </div>
+      ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
+        <div class="sidebar-order-tracking">📦 ${order.trackingNumbers[0]}</div>
+      ` : ''}
+    </div>
+  `).join('')
+  orderResultDiv.classList.remove('hidden')
+  orderBtn.textContent = 'Refresh Orders'
+  console.log('Freshdesk AI: Auto-displayed sidebar orders')
+}
+
+// Auto-display preloaded summary in sidebar widget
+function autoDisplaySidebarSummary() {
+  if (!preloadedSummaryData) return
+
+  const resultDiv = document.querySelector('.sidebar-summary-result')
+  const generateBtn = document.querySelector('.sidebar-summary-generate-btn')
+  if (!resultDiv || !generateBtn) return
+
+  const data = preloadedSummaryData as { summary?: string; keyPoints?: string[]; sentiment?: string; actionNeeded?: string }
+  if (!data.summary) return
+
+  resultDiv.innerHTML = `
+    <div class="sidebar-summary-card">
+      <p class="sidebar-summary-text">${data.summary}</p>
+      ${data.keyPoints && data.keyPoints.length > 0 ? `
+        <ul class="sidebar-key-points">
+          ${data.keyPoints.map((point: string) => `<li>${point}</li>`).join('')}
+        </ul>
+      ` : ''}
+      ${data.sentiment ? `<span class="sentiment-badge ${data.sentiment}">${data.sentiment}</span>` : ''}
+      ${data.actionNeeded ? `<p class="sidebar-action"><strong>Action:</strong> ${data.actionNeeded}</p>` : ''}
+    </div>
+  `
+  resultDiv.classList.remove('hidden')
+  generateBtn.textContent = 'Refresh Summary'
+  console.log('Freshdesk AI: Auto-displayed sidebar summary')
+}
+
+// Clear preloaded data (call when navigating to new ticket)
+function clearPreloadedData() {
+  preloadedOrderData = null
+  preloadedSummaryData = null
+  isPreloadingOrders = false
+  isPreloadingSummary = false
+}
+
 // Initialize
 function init() {
   console.log('Freshdesk AI Assistant content script loaded')
@@ -2058,7 +2244,11 @@ function init() {
     setTimeout(() => {
       injectInlineButton()
       // Also try to inject sidebar summary button
-      setTimeout(() => injectSidebarSummaryButton(), 500)
+      setTimeout(() => {
+        injectSidebarSummaryButton()
+        // Start preloading data in background
+        setTimeout(() => preloadTicketData(), 500)
+      }, 500)
     }, 1000)
   }
 
@@ -2072,11 +2262,17 @@ function init() {
       if (isOnTicketPage()) {
         // Reset sidebar injection attempts for new ticket
         sidebarInjectionAttempts = 0
+        // Clear preloaded data for new ticket
+        clearPreloadedData()
 
         setTimeout(() => {
           injectInlineButton()
           // Also try to inject sidebar summary button on new ticket
-          setTimeout(() => injectSidebarSummaryButton(), 500)
+          setTimeout(() => {
+            injectSidebarSummaryButton()
+            // Start preloading data in background
+            setTimeout(() => preloadTicketData(), 500)
+          }, 500)
         }, 1000)
       } else {
         removeFloatingButton()

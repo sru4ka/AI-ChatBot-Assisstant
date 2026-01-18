@@ -209,10 +209,10 @@ Deno.serve(async (req: Request) => {
       )
     }
 
-    // STRATEGY: Try scraping FIRST if URL is available (faster and more reliable for many carriers)
-    // Then fall back to API if scraping fails
+    // SCRAPING-ONLY STRATEGY: Only use URL scraping for tracking
+    // This is more reliable and doesn't require API keys
     if (trackingUrl) {
-      console.log('Tracking URL provided, trying scraping first:', trackingUrl)
+      console.log('Tracking URL provided, scraping:', trackingUrl)
       const scraped = await scrapeTrackingUrl(trackingUrl)
       if (scraped) {
         console.log('Scraping successful:', scraped.statusDescription)
@@ -231,148 +231,23 @@ Deno.serve(async (req: Request) => {
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      console.log('Scraping failed, will try API...')
+      console.log('Scraping failed - could not extract status from tracking page')
     }
 
-    // Use global TrackingMore API key from environment variable
-    const trackingApiKey = Deno.env.get('TRACKINGMORE_API_KEY')
-
-    // If no API key and scraping already failed above, return error
-    if (!trackingApiKey) {
-      console.log('No API key configured')
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Tracking unavailable - no tracking URL or API configured',
-          trackingNumber,
-          carrier: null,
-          status: 'unavailable',
-          statusDescription: 'Tracking unavailable',
-          estimatedDelivery: null,
-          lastUpdate: null,
-          events: [],
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Clean tracking number
-    const cleanTrackingNumber = trackingNumber.trim().replace(/\s/g, '')
-
-    // Detect or use provided carrier
-    let carrierCode: string | null = null
-    if (carrier) {
-      const lowerCarrier = carrier.toLowerCase().replace(/\s+/g, '-')
-      carrierCode = carrierCodes[lowerCarrier] || lowerCarrier
-    } else {
-      carrierCode = detectCarrier(cleanTrackingNumber)
-    }
-
-    // Build request body for TrackingMore realtime API
-    const requestBody: { tracking_number: string; carrier_code?: string } = {
-      tracking_number: cleanTrackingNumber,
-    }
-    if (carrierCode) {
-      requestBody.carrier_code = carrierCode
-    }
-
-    // Call TrackingMore realtime API
-    const trackResponse = await fetch('https://api.trackingmore.com/v3/trackings/realtime', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Tracking-Api-Key': trackingApiKey,
-      },
-      body: JSON.stringify(requestBody),
-    })
-
-    const trackData = await trackResponse.json()
-    console.log('TrackingMore response:', JSON.stringify(trackData))
-
-    // Parse the response
-    const result: TrackingResult = {
-      success: true,
-      trackingNumber: cleanTrackingNumber,
-      carrier: null,
-      status: 'unknown',
-      statusDescription: 'Unknown',
-      estimatedDelivery: null,
-      lastUpdate: null,
-      events: [],
-    }
-
-    // Check for API errors - try scraping as fallback
-    if (trackData.meta?.code !== 200) {
-      console.log('API failed, trying URL scraping fallback...')
-
-      // Try scraping the tracking URL if provided
-      if (trackingUrl) {
-        const scraped = await scrapeTrackingUrl(trackingUrl)
-        if (scraped) {
-          return new Response(
-            JSON.stringify({
-              success: true,
-              trackingNumber: cleanTrackingNumber,
-              carrier: carrierCode || null,
-              status: scraped.status,
-              statusDescription: scraped.statusDescription,
-              estimatedDelivery: null,
-              lastUpdate: null,
-              events: [],
-              source: 'scraped',
-            }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
-        }
-      }
-
-      result.success = false
-      result.error = trackData.meta?.message || 'API error'
-      result.status = 'error'
-      result.statusDescription = trackData.meta?.message || 'Error'
-
-      return new Response(
-        JSON.stringify(result),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Parse successful response
-    const data = trackData.data
-    if (data) {
-      // Get carrier info
-      if (data.carrier_code) {
-        result.carrier = data.carrier_code
-      }
-
-      // Get status
-      const status = data.delivery_status || 'pending'
-      result.status = status
-      result.statusDescription = statusMap[status] || status.charAt(0).toUpperCase() + status.slice(1)
-
-      // Get last update time
-      if (data.lastest_checkpoint_time || data.latest_checkpoint_time) {
-        result.lastUpdate = data.lastest_checkpoint_time || data.latest_checkpoint_time
-      }
-
-      // Get estimated delivery (if available)
-      if (data.expected_delivery) {
-        result.estimatedDelivery = data.expected_delivery
-      }
-
-      // Get tracking events from origin_info
-      const trackInfo = data.origin_info?.trackinfo || data.destination_info?.trackinfo || []
-      if (Array.isArray(trackInfo)) {
-        result.events = trackInfo.map((event: { Date?: string; StatusDescription?: string; Details?: string }) => ({
-          time: event.Date || '',
-          location: event.Details || '',
-          description: event.StatusDescription || '',
-        }))
-      }
-    }
-
+    // No tracking URL provided or scraping failed
+    console.log('No tracking URL available or scraping failed')
     return new Response(
-      JSON.stringify(result),
+      JSON.stringify({
+        success: false,
+        error: trackingUrl ? 'Could not read tracking status from page' : 'No tracking URL available',
+        trackingNumber,
+        carrier: carrier || null,
+        status: 'unavailable',
+        statusDescription: trackingUrl ? 'Could not read status' : 'No tracking URL',
+        estimatedDelivery: null,
+        lastUpdate: null,
+        events: [],
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
