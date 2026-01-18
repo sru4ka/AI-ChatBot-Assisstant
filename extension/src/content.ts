@@ -1167,6 +1167,145 @@ function extractCustomerInfo(): CustomerInfo {
   return info
 }
 
+// Render order data into the results element
+function renderOrderData(
+  data: unknown,
+  customerInfo: CustomerInfo,
+  resultsEl: HTMLElement,
+  emptyEl: HTMLElement,
+  _loadingEl: HTMLElement
+) {
+  const orderData = data as { found?: boolean; orders?: ShopifyOrderResult[] }
+
+  if (!orderData || !orderData.orders || orderData.orders.length === 0) {
+    const searchedInfo = [
+      customerInfo.orderNumber ? `Order #${customerInfo.orderNumber}` : null,
+      customerInfo.name,
+      customerInfo.email,
+      customerInfo.phone,
+    ].filter(Boolean).join(', ')
+
+    resultsEl.innerHTML = `
+      <div class="order-info-no-results">
+        <p>No orders found for:</p>
+        <p><strong>${searchedInfo || 'Unknown customer'}</strong></p>
+      </div>
+    `
+    resultsEl.classList.remove('hidden')
+    emptyEl.classList.add('hidden')
+    return
+  }
+
+  // Filter orders to only show orders matching the customer's email (if available)
+  let filteredOrders = orderData.orders
+  if (customerInfo.email) {
+    const customerEmailLower = customerInfo.email.toLowerCase()
+    filteredOrders = orderData.orders.filter((order: { email?: string }) =>
+      order.email?.toLowerCase() === customerEmailLower
+    )
+    if (filteredOrders.length === 0) {
+      filteredOrders = orderData.orders
+    }
+  }
+
+  // Limit to 10 most recent orders
+  filteredOrders = filteredOrders.slice(0, 10)
+
+  // Render orders
+  resultsEl.innerHTML = filteredOrders.map((order: ShopifyOrderResult) => `
+    <div class="order-card">
+      <div class="order-header">
+        <span class="order-number">${order.name}</span>
+        <span class="order-date">${new Date(order.date).toLocaleDateString()}</span>
+      </div>
+      <div class="order-status">
+        <span class="status-badge ${order.status}">${order.status}</span>
+        ${order.fulfillmentStatus ? `<span class="status-badge ${order.fulfillmentStatus}">${order.fulfillmentStatus}</span>` : ''}
+      </div>
+      <div class="order-total">${order.total}</div>
+      ${order.items && order.items.length > 0 ? `
+        <div class="order-items">
+          ${order.items.map((item: { title: string; quantity: number }) => `<div class="order-item">${item.title} x${item.quantity}</div>`).join('')}
+        </div>
+      ` : ''}
+      ${order.trackingNumbers && order.trackingNumbers.length > 0 ? `
+        <div class="tracking-status">
+          <div class="tracking-status-header">
+            <span class="tracking-status-label">Tracking</span>
+            ${order.trackingStatuses && order.trackingStatuses.length > 0
+              ? `<span class="tracking-status-badge ${order.trackingStatuses[0].replace(/_/g, '-')}">${order.trackingStatuses[0].replace(/_/g, ' ')}</span>`
+              : '<span class="tracking-status-badge confirmed">Shipped</span>'
+            }
+          </div>
+          <div class="tracking-info">
+            ${order.trackingNumbers.map((num: string, i: number) => `
+              <div class="tracking-number-row" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">
+                <span>${order.trackingCompanies?.[i] || 'Other'}: <strong>${num}</strong></span>
+                <button class="track-btn get-tracking-status" data-tracking="${num}" data-carrier="${order.trackingCompanies?.[i] || ''}" data-url="${order.trackingUrls?.[i] || ''}">Loading...</button>
+                ${order.trackingUrls?.[i] ? `<a href="${order.trackingUrls[i]}" target="_blank" class="track-btn" style="background:#6b7280;">Track →</a>` : ''}
+              </div>
+              <div class="tracking-details hidden" id="tracking-details-${num.replace(/[^a-zA-Z0-9]/g, '')}"></div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+      ${order.shippingAddress ? `
+        <div class="order-shipping">Ships to: ${order.shippingAddress.city}, ${order.shippingAddress.province}, ${order.shippingAddress.country}</div>
+      ` : ''}
+      ${order.note ? `
+        <div class="order-note"><strong>Order Note:</strong> ${order.note}</div>
+      ` : ''}
+      ${order.noteAttributes && order.noteAttributes.length > 0 ? `
+        <div class="order-note-attributes">
+          ${order.noteAttributes.map((attr: { name: string; value: string }) => `
+            <div class="order-note"><strong>${attr.name}:</strong> ${linkifyOrderIds(attr.value)}</div>
+          `).join('')}
+        </div>
+      ` : ''}
+      ${(() => {
+        const comments = order.events?.filter((e: { body: string | null }) => e.body) || []
+        if (comments.length === 0) return ''
+        return `
+          <details class="order-comments" open>
+            <summary class="order-comments-title">Comments (${comments.length})</summary>
+            <div class="comments-list">
+              ${comments.map((comment: { created_at: string; message: string; body: string | null; author: string | null }) => `
+                <div class="comment-item">
+                  <div class="comment-header">
+                    ${comment.author ? `<span class="comment-author">${comment.author}</span>` : ''}
+                    <span class="comment-date">${new Date(comment.created_at).toLocaleString()}</span>
+                  </div>
+                  <div class="comment-body">${linkifyOrderIds(comment.body || '')}</div>
+                </div>
+              `).join('')}
+            </div>
+          </details>
+        `
+      })()}
+      <details class="order-timeline">
+        <summary class="order-timeline-title">Timeline ${order.events && order.events.length > 0 ? `(${order.events.length} events)` : ''}</summary>
+        <div class="timeline-events">
+          ${(order.events || []).slice(0, 15).map((event: { created_at: string; message: string }) => `
+            <div class="timeline-event">
+              <span class="event-time">${new Date(event.created_at).toLocaleString()}</span>
+              <span class="event-message">${event.message}</span>
+            </div>
+          `).join('')}
+        </div>
+      </details>
+      <a href="${order.adminUrl}" target="_blank" class="view-in-shopify">View in Shopify</a>
+    </div>
+  `).join('')
+
+  resultsEl.classList.remove('hidden')
+  emptyEl.classList.add('hidden')
+
+  // Setup tracking buttons - auto-load tracking status
+  setupTrackingButtons()
+  // Auto-fetch tracking status for all orders
+  autoFetchAllTrackingStatus()
+}
+
 // Search for orders from Shopify
 async function handleSearchOrders() {
   const orderInfoContent = document.getElementById('order-info-content')
@@ -1176,14 +1315,26 @@ async function handleSearchOrders() {
 
   if (!orderInfoContent || !loadingEl || !emptyEl || !resultsEl) return
 
+  // Extract customer info from ticket
+  const customerInfo = extractCustomerInfo()
+
+  // Check if we have preloaded data - use it immediately (skip fetch)
+  if (preloadedOrderData) {
+    console.log('Freshdesk AI: Using preloaded order data')
+    loadingEl.classList.add('hidden')
+    // Use preloaded data and clear it (so Refresh will fetch fresh)
+    const cachedData = preloadedOrderData
+    preloadedOrderData = null
+    renderOrderData(cachedData, customerInfo, resultsEl as HTMLElement, emptyEl as HTMLElement, loadingEl as HTMLElement)
+    return
+  }
+
   // Show loading
   loadingEl.classList.remove('hidden')
   emptyEl.classList.add('hidden')
   resultsEl.classList.add('hidden')
 
   try {
-    // Extract customer info from ticket
-    const customerInfo = extractCustomerInfo()
 
     // Build search queries - prioritize email to get ALL customer orders
     // Email search returns ALL orders for that customer, which is what we want

@@ -86,14 +86,16 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
 
     // Look for status keywords in priority order
     const statusKeywords: Array<{ keywords: string[]; status: string; description: string }> = [
-      { keywords: ['delivered', 'delivery completed', 'has been delivered', 'was delivered', 'package delivered'], status: 'delivered', description: 'Delivered' },
+      { keywords: ['delivered', 'delivery completed', 'has been delivered', 'was delivered', 'package delivered', 'successfully delivered'], status: 'delivered', description: 'Delivered' },
+      { keywords: ['abnormal status', 'abnormal', 'delivery attempt unsuccessful', 'delivery attempt failure', 'address is incorrect', 'address is unknown', 'address unknown', 'wrong address', 'incorrect address', 'undeliverable'], status: 'exception', description: 'Delivery Exception' },
       { keywords: ['out for delivery', 'out-for-delivery', 'on vehicle for delivery'], status: 'out_for_delivery', description: 'Out for Delivery' },
-      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route'], status: 'transit', description: 'In Transit' },
-      { keywords: ['arrived at', 'departed from', 'processed', 'arrived at destination'], status: 'transit', description: 'In Transit' },
+      { keywords: ['in transit', 'in-transit', 'on the way', 'on its way', 'shipment in progress', 'en route', 'transit'], status: 'transit', description: 'In Transit' },
+      { keywords: ['arrived at', 'departed from', 'processed', 'arrived at destination', 'arrival scan', 'departure scan', 'local delivery center'], status: 'transit', description: 'In Transit' },
+      { keywords: ['held in', 'held at', 'holding at', 'held by customs', 'customs clearance'], status: 'held', description: 'Held/Customs' },
       { keywords: ['pickup scheduled', 'ready for pickup', 'available for pickup'], status: 'pickup', description: 'Ready for Pickup' },
       { keywords: ['shipped', 'dispatched', 'label created', 'shipping label', 'order shipped'], status: 'shipped', description: 'Shipped' },
-      { keywords: ['exception', 'delivery attempt', 'delivery failed', 'unable to deliver', 'returned'], status: 'exception', description: 'Exception' },
-      { keywords: ['pending', 'awaiting shipment', 'not yet shipped', 'processing'], status: 'pending', description: 'Pending' },
+      { keywords: ['exception', 'delivery attempt', 'delivery failed', 'unable to deliver', 'returned', 'return to sender'], status: 'exception', description: 'Exception' },
+      { keywords: ['pending', 'awaiting shipment', 'not yet shipped', 'processing', 'info received'], status: 'pending', description: 'Pending' },
     ]
 
     for (const { keywords, status, description } of statusKeywords) {
@@ -101,17 +103,44 @@ async function scrapeTrackingUrl(url: string): Promise<{ status: string; statusD
         if (textLower.includes(keyword)) {
           console.log(`Found keyword "${keyword}" - status: ${status}`)
 
-          // Try to extract days to delivery
-          const daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
           let extraInfo = ''
-          if (daysMatch) {
-            extraInfo = ` (Est. ${daysMatch[1]} days)`
+
+          // For exceptions/abnormal status, try to extract the specific error message
+          if (status === 'exception') {
+            // Try to extract specific error messages
+            const errorPatterns = [
+              /delivery attempt unsuccessful[.\s]*([^<\n]{0,100})/i,
+              /address is (?:incorrect|unknown|wrong)[.\s]*([^<\n]{0,50})/i,
+              /carrier note[:\s]*([^<\n]{0,100})/i,
+              /abnormal status[.\s]*([^<\n]{0,100})/i,
+              /exception[:\s]*([^<\n]{0,100})/i,
+            ]
+            for (const pattern of errorPatterns) {
+              const match = html.match(pattern)
+              if (match) {
+                const detail = match[0].replace(/<[^>]*>/g, '').trim().slice(0, 80)
+                if (detail && detail.length > 5) {
+                  extraInfo = ` - ${detail}`
+                  break
+                }
+              }
+            }
+          }
+
+          // Try to extract days to delivery
+          if (!extraInfo) {
+            const daysMatch = html.match(/(\d+)\s*(?:days?|business days?)\s*(?:to|until|for)?\s*(?:delivery|arrive)/i)
+            if (daysMatch) {
+              extraInfo = ` (Est. ${daysMatch[1]} days)`
+            }
           }
 
           // Try to extract delivery date
-          const dateMatch = html.match(/(?:estimated|expected|delivery)[\s:]+(?:by\s+)?([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i)
-          if (dateMatch && !extraInfo) {
-            extraInfo = ` (Est. ${dateMatch[1]})`
+          if (!extraInfo) {
+            const dateMatch = html.match(/(?:estimated|expected|delivery)[\s:]+(?:by\s+)?([A-Za-z]+\s+\d{1,2}(?:,?\s+\d{4})?|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i)
+            if (dateMatch) {
+              extraInfo = ` (Est. ${dateMatch[1]})`
+            }
           }
 
           return {
